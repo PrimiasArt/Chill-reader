@@ -95,6 +95,12 @@ public class MediaPlaybackService extends Service {
         int totalSentences
     ) {
         try {
+            if (context == null) return;
+            // If not playing and service is not already running, DO NOT start the service!
+            if (!isPlaying && sInstance == null) {
+                return;
+            }
+
             Intent intent = new Intent(context, MediaPlaybackService.class);
             intent.setAction(ACTION_UPDATE_PLAYBACK);
             intent.putExtra(EXTRA_CHAPTER_TITLE, chapterTitle);
@@ -105,23 +111,31 @@ public class MediaPlaybackService extends Service {
             intent.putExtra(EXTRA_CURRENT_SENTENCE, currentSentence);
             intent.putExtra(EXTRA_TOTAL_SENTENCES, totalSentences);
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, intent);
+            if (isPlaying) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ContextCompat.startForegroundService(context, intent);
+                } else {
+                    context.startService(intent);
+                }
             } else {
-                context.startService(intent);
+                // If not playing, only send intent to existing service instance
+                if (sInstance != null) {
+                    context.startService(intent);
+                }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
     }
 
     public static void stop(Context context) {
         try {
+            if (context == null || sInstance == null) return;
             Intent intent = new Intent(context, MediaPlaybackService.class);
             intent.setAction(ACTION_CLEAR_PLAYBACK);
             context.startService(intent);
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
     }
 
@@ -132,6 +146,26 @@ public class MediaPlaybackService extends Service {
         createNotificationChannel();
         initMediaSession();
         registerMediaReceiver();
+
+        // Android 8.0+ contract: When service is started via startForegroundService,
+        // we MUST call startForeground immediately within 5 seconds.
+        // Calling startForeground in onCreate() guarantees that this contract is ALWAYS fulfilled.
+        try {
+            Notification initNotification = buildNotification(
+                "Chill Reader",
+                "Đang phát âm thanh",
+                "Chill Reader",
+                false,
+                null
+            );
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, initNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(NOTIFICATION_ID, initNotification);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
     }
 
     @Override
@@ -178,7 +212,7 @@ public class MediaPlaybackService extends Service {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
                 "Trình phát âm thanh Chill Reader",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_LOW
             );
             channel.setDescription("Điều khiển âm thanh Chill Reader trên màn hình khóa và thanh thông báo");
             channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
@@ -383,29 +417,20 @@ public class MediaPlaybackService extends Service {
         Notification notification = buildNotification(title, subtitle, book, isPlaying, artBitmap);
 
         try {
-            if (isPlaying) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-                } else {
-                    startForeground(NOTIFICATION_ID, notification);
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             } else {
-                // When paused, detach foreground so system resources can rest, but keep notification active on lockscreen
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_DETACH);
-                } else {
-                    stopForeground(false);
-                }
-                if (notificationManager != null) {
-                    notificationManager.notify(NOTIFICATION_ID, notification);
-                }
+                startForeground(NOTIFICATION_ID, notification);
             }
-        } catch (Exception e) {
+            if (notificationManager != null) {
+                notificationManager.notify(NOTIFICATION_ID, notification);
+            }
+        } catch (Throwable e) {
             e.printStackTrace();
             if (notificationManager != null) {
                 try {
                     notificationManager.notify(NOTIFICATION_ID, notification);
-                } catch (Exception ignored) {}
+                } catch (Throwable ignored) {}
             }
         }
     }

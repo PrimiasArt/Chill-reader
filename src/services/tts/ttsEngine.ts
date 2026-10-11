@@ -463,7 +463,13 @@ class TTSEngine {
     this.state = state;
     this.listeners.forEach(l => l.onStateChange?.(state));
     this.updateMediaSessionPlaybackState();
-    this.updateNativeNotification(state === 'playing');
+    if (state === 'playing') {
+      this.updateNativeNotification(true);
+    } else if (state === 'paused') {
+      this.updateNativeNotification(false);
+    } else if (state === 'idle') {
+      this.clearNativeNotification();
+    }
   }
 
   private notifySentence(index: number, text: string) {
@@ -513,7 +519,6 @@ class TTSEngine {
     this.sentences = this.splitIntoSentences(content);
     this.currentSentenceIndex = Math.max(0, Math.min(startFromSentenceIndex, Math.max(0, this.sentences.length - 1)));
     this.updateMediaSessionMetadata();
-    this.updateNativeNotification(false);
   }
 
   public play() {
@@ -1145,6 +1150,7 @@ class TTSEngine {
    * Communicates with MainActivity.java via JavascriptInterface 'AndroidMedia'
    */
   private updateNativeNotification(isPlaying: boolean) {
+    if (this.state === 'idle' && !isPlaying) return;
     try {
       const androidMedia = (window as any).AndroidMedia;
       if (androidMedia && typeof androidMedia.updateMedia === 'function') {

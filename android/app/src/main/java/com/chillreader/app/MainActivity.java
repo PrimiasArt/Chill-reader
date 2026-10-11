@@ -68,29 +68,6 @@ public class MainActivity extends BridgeActivity {
         sInstance = this;
     }
 
-    @Override
-    public void onPause() {
-        super.onPause();
-        // If media is actively playing in background, ensure WebView is kept active so timers/callbacks continue
-        if (MediaPlaybackService.isPlaying()) {
-            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
-            if (webView != null) {
-                webView.onResume();
-            }
-        }
-    }
-
-    @Override
-    public void onStop() {
-        super.onStop();
-        if (MediaPlaybackService.isPlaying()) {
-            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
-            if (webView != null) {
-                webView.onResume();
-            }
-        }
-    }
-
     private void setupWebViewBridge() {
         try {
             WebView webView = getBridge() != null ? getBridge().getWebView() : null;
@@ -112,7 +89,6 @@ public class MainActivity extends BridgeActivity {
             try {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
                 if (webView != null) {
-                    webView.onResume(); // Ensure JS execution is not suspended
                     webView.evaluateJavascript(js, null);
                 }
             } catch (Exception e) {
@@ -162,33 +138,45 @@ public class MainActivity extends BridgeActivity {
     private class AndroidMediaBridge {
         @JavascriptInterface
         public boolean isNativeTtsReady() {
-            return isNativeTtsReady && nativeTts != null;
+            try {
+                return isNativeTtsReady && nativeTts != null;
+            } catch (Throwable t) {
+                return false;
+            }
         }
 
         @JavascriptInterface
         public void speakNative(String text, float rate, float pitch, String utteranceId) {
-            if (nativeTts == null || !isNativeTtsReady) return;
-            runOnUiThread(() -> {
-                try {
-                    nativeTts.setSpeechRate(rate);
-                    nativeTts.setPitch(pitch);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        nativeTts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId);
+            try {
+                if (nativeTts == null || !isNativeTtsReady) return;
+                runOnUiThread(() -> {
+                    try {
+                        nativeTts.setSpeechRate(rate);
+                        nativeTts.setPitch(pitch);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            nativeTts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId);
+                        }
+                    } catch (Throwable e) {
+                        e.printStackTrace();
                     }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            });
+                });
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }
 
         @JavascriptInterface
         public void stopNative() {
-            if (nativeTts != null) {
-                runOnUiThread(() -> {
-                    try {
-                        nativeTts.stop();
-                    } catch (Exception ignored) {}
-                });
+            try {
+                if (nativeTts != null) {
+                    runOnUiThread(() -> {
+                        try {
+                            nativeTts.stop();
+                        } catch (Throwable ignored) {}
+                    });
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
             }
         }
 
@@ -212,21 +200,29 @@ public class MainActivity extends BridgeActivity {
             int currentSentence, 
             int totalSentences
         ) {
-            MediaPlaybackService.startOrUpdate(
-                MainActivity.this,
-                chapterTitle,
-                bookTitle,
-                author,
-                isPlaying,
-                coverUrl,
-                currentSentence,
-                totalSentences
-            );
+            try {
+                MediaPlaybackService.startOrUpdate(
+                    MainActivity.this,
+                    chapterTitle,
+                    bookTitle,
+                    author,
+                    isPlaying,
+                    coverUrl,
+                    currentSentence,
+                    totalSentences
+                );
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }
 
         @JavascriptInterface
         public void clearMedia() {
-            MediaPlaybackService.stop(MainActivity.this);
+            try {
+                MediaPlaybackService.stop(MainActivity.this);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }
 
         @JavascriptInterface
