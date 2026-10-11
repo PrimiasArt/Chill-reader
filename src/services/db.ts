@@ -10,7 +10,8 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   paragraphSpacing: 16,
   readerMode: 'scroll',
   autoScroll: false,
-  autoScrollSpeed: 3
+  autoScrollSpeed: 3,
+  keepScreenAwake: true
 };
 
 export const DEFAULT_TTS_SETTINGS: TTSSettings = {

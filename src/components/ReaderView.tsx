@@ -281,6 +281,20 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     }
   }, [activeSentenceIndex, settings.readerMode, ttsState, totalPages, currentPageIndex]);
 
+  // Keep screen awake while reading or listening in ReaderView
+  useEffect(() => {
+    const androidMedia = (window as any).AndroidMedia;
+    const shouldKeepAwake = settings.keepScreenAwake !== false;
+    if (androidMedia && typeof androidMedia.setKeepScreenOn === 'function') {
+      androidMedia.setKeepScreenOn(shouldKeepAwake);
+    }
+    return () => {
+      if (androidMedia && typeof androidMedia.setKeepScreenOn === 'function') {
+        androidMedia.setKeepScreenOn(false);
+      }
+    };
+  }, [settings.keepScreenAwake]);
+
   // Virtual scrolling parameters for TOC
   const ITEM_HEIGHT = 40;
   const filteredChapters = chapters.filter(c => 
@@ -1036,6 +1050,20 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   Lật trang (Kindle)
                 </button>
               </div>
+            </div>
+
+            {/* Giữ màn hình luôn sáng khi đọc */}
+            <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
+              <div>
+                <label className="text-xs text-zinc-200 font-medium block">Giữ màn hình luôn sáng</label>
+                <span className="text-[11px] text-zinc-400">Không tự tắt màn hình khi đang mở truyện đọc</span>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.keepScreenAwake !== false}
+                onChange={(e) => onUpdateSettings({ keepScreenAwake: e.target.checked })}
+                className="w-4 h-4 rounded-sm accent-amber-500 cursor-pointer"
+              />
             </div>
 
             {/* Offline Audio Download */}

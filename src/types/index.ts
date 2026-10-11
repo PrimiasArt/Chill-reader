@@ -41,6 +41,7 @@ export interface ReaderSettings {
   readerMode: ReaderMode;
   autoScroll: boolean;
   autoScrollSpeed: number; // 1 - 10
+  keepScreenAwake?: boolean;
 }
 
 export type TTSEngineType = 'ai' | 'google' | 'browser' | 'native';

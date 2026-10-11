@@ -292,7 +292,7 @@ public class MediaPlaybackService extends Service {
                 false,
                 null
             );
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, initNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             } else {
                 startForeground(NOTIFICATION_ID, initNotification);
@@ -696,6 +696,15 @@ public class MediaPlaybackService extends Service {
                         @Override
                         public void onStop(String utteranceId, boolean interrupted) {
                             cancelTtsWatchdog();
+                            if (isNativeTtsMode && sIsPlaying && !pausedBySystem) {
+                                // Screen timeout, lockscreen transition, or temporary system audio focus glitch interrupted the utterance.
+                                // Automatically recover and resume playback!
+                                mainHandler.postDelayed(() -> {
+                                    if (isNativeTtsMode && sIsPlaying && !pausedBySystem) {
+                                        playCurrentNativeSentence();
+                                    }
+                                }, 300);
+                            }
                         }
                     });
 
@@ -747,7 +756,10 @@ public class MediaPlaybackService extends Service {
     private void playCurrentNativeSentence() {
         cancelTtsWatchdog();
         if (!isNativeTtsMode || !sIsPlaying) return;
-        if (nativeTts == null || !isNativeTtsReady) return;
+        if (nativeTts == null || !isNativeTtsReady) {
+            initNativeTts();
+            return;
+        }
 
         // Skip non-readable / punctuation-only sentences to avoid TTS stall
         while (nativeSentenceIndex < nativeSentences.size() && !hasReadableText(nativeSentences.get(nativeSentenceIndex))) {
@@ -918,11 +930,23 @@ public class MediaPlaybackService extends Service {
                 audioFocusChangeListener = focusChange -> {
                     switch (focusChange) {
                         case AudioManager.AUDIOFOCUS_LOSS:
-                        case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                            boolean highPriority = isHighPriorityAudioActive();
+                            boolean callActivePermanent = isHighPriorityAudioActive();
+                            if (callActivePermanent || !playAlongOtherApps) {
+                                if (sIsPlaying) {
+                                    if (isNativeTtsMode) {
+                                        pauseNativeTts(true);
+                                    } else {
+                                        pausedBySystem = true;
+                                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                                    }
+                                }
+                            }
+                            break;
 
-                            // If user enabled "playAlongOtherApps" (default true), only pause for alarms, calls & ringtones
-                            if (highPriority || !playAlongOtherApps) {
+                        case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                            // ONLY pause on transient audio focus loss if there is an active incoming call or ongoing call.
+                            // NEVER pause on screen lock sounds, notification chimes, or keyboard clicks!
+                            if (isHighPriorityAudioActive()) {
                                 if (sIsPlaying) {
                                     if (isNativeTtsMode) {
                                         pauseNativeTts(true);
@@ -1091,7 +1115,7 @@ public class MediaPlaybackService extends Service {
             notification = buildNotification(title, subtitle, book, isPlaying, artBitmap);
 
             if (!isForegroundRunning) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
                 } else {
                     startForeground(NOTIFICATION_ID, notification);

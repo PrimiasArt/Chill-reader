@@ -10,6 +10,7 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -343,6 +344,21 @@ public class MainActivity extends BridgeActivity {
             } catch (Throwable t) {
                 return true;
             }
+        }
+
+        @JavascriptInterface
+        public void setKeepScreenOn(boolean keepOn) {
+            runOnUiThread(() -> {
+                try {
+                    if (keepOn) {
+                        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    } else {
+                        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    }
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                }
+            });
         }
 
         @JavascriptInterface
