@@ -12,11 +12,13 @@ import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
@@ -45,10 +47,14 @@ import org.json.JSONArray;
  *   persistently through the night without dependency on paused WebViews.
  * - Integrates seamlessly with Android 11+ System Media Player & Lock Screen controls.
  * - Handles Audio Focus changes (pauses on calls/navigation, resumes automatically).
+ * - Allows concurrent playback alongside other apps/games without silent focus interruptions.
  */
 public class MediaPlaybackService extends Service {
     public static final String CHANNEL_ID = "chill_reader_playback_v3";
     public static final int NOTIFICATION_ID = 9021;
+
+    public static final String PREFS_NAME = "chill_reader_playback_prefs";
+    public static final String PREF_PLAY_ALONG = "pref_play_along_other_apps";
 
     public static final String ACTION_PLAY_PAUSE = "com.chillreader.ACTION_PLAY_PAUSE";
     public static final String ACTION_NEXT = "com.chillreader.ACTION_NEXT";
@@ -58,6 +64,7 @@ public class MediaPlaybackService extends Service {
     public static final String ACTION_UPDATE_PLAYBACK = "com.chillreader.ACTION_UPDATE_PLAYBACK";
     public static final String ACTION_CLEAR_PLAYBACK = "com.chillreader.ACTION_CLEAR_PLAYBACK";
     public static final String ACTION_START_NATIVE_QUEUE = "com.chillreader.ACTION_START_NATIVE_QUEUE";
+    public static final String ACTION_SET_AUDIO_FOCUS_MODE = "com.chillreader.ACTION_SET_AUDIO_FOCUS_MODE";
 
     public static final String EXTRA_CHAPTER_TITLE = "extra_chapter_title";
     public static final String EXTRA_BOOK_TITLE = "extra_book_title";
@@ -70,9 +77,12 @@ public class MediaPlaybackService extends Service {
     public static final String EXTRA_START_INDEX = "extra_start_index";
     public static final String EXTRA_RATE = "extra_rate";
     public static final String EXTRA_PITCH = "extra_pitch";
+    public static final String EXTRA_PLAY_ALONG_OTHER_APPS = "extra_play_along_other_apps";
 
     private static volatile MediaPlaybackService sInstance = null;
     private static volatile boolean sIsPlaying = false;
+    private volatile boolean playAlongOtherApps = true;
+    private volatile boolean pausedBySystem = false;
 
     private NotificationManager notificationManager;
     private MediaSessionCompat mediaSession;
@@ -201,10 +211,44 @@ public class MediaPlaybackService extends Service {
         }
     }
 
+    public static void setPlayAlong(Context context, boolean enable) {
+        try {
+            if (sInstance != null) {
+                sInstance.setPlayAlongOtherApps(enable);
+            }
+            if (context != null) {
+                Intent intent = new Intent(context, MediaPlaybackService.class);
+                intent.setAction(ACTION_SET_AUDIO_FOCUS_MODE);
+                intent.putExtra(EXTRA_PLAY_ALONG_OTHER_APPS, enable);
+                context.startService(intent);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public void setPlayAlongOtherApps(boolean enable) {
+        this.playAlongOtherApps = enable;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            prefs.edit().putBoolean(PREF_PLAY_ALONG, enable).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    public boolean isPlayAlongOtherApps() {
+        return this.playAlongOtherApps;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
         sInstance = this;
+
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            playAlongOtherApps = prefs.getBoolean(PREF_PLAY_ALONG, true);
+        } catch (Throwable ignored) {}
+
         createNotificationChannel();
         initMediaSession();
         registerMediaReceiver();
@@ -244,6 +288,12 @@ public class MediaPlaybackService extends Service {
         if (ACTION_CLEAR_PLAYBACK.equals(action)) {
             clearPlayback();
             return START_NOT_STICKY;
+        }
+
+        if (ACTION_SET_AUDIO_FOCUS_MODE.equals(action)) {
+            boolean enable = intent.getBooleanExtra(EXTRA_PLAY_ALONG_OTHER_APPS, true);
+            setPlayAlongOtherApps(enable);
+            return START_STICKY;
         }
 
         if (ACTION_START_NATIVE_QUEUE.equals(action)) {
@@ -445,6 +495,17 @@ public class MediaPlaybackService extends Service {
                             nativeTts.setLanguage(new Locale("vi"));
                         }
                     } catch (Throwable ignored) {}
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        try {
+                            AudioAttributes aa = new AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build();
+                            nativeTts.setAudioAttributes(aa);
+                        } catch (Throwable ignored) {}
+                    }
+
                     isNativeTtsReady = true;
 
                     nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
@@ -532,7 +593,9 @@ public class MediaPlaybackService extends Service {
             nativeTts.setPitch(nativePitch);
             String sentence = nativeSentences.get(nativeSentenceIndex);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, null, "utt_" + nativeSentenceIndex);
+                Bundle params = new Bundle();
+                params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
+                nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, params, "utt_" + nativeSentenceIndex);
             }
         } catch (Throwable t) {
             t.printStackTrace();
@@ -543,6 +606,7 @@ public class MediaPlaybackService extends Service {
 
     public void pauseNativeTts() {
         sIsPlaying = false;
+        pausedBySystem = false;
         if (nativeTts != null) {
             try {
                 nativeTts.stop();
@@ -611,16 +675,32 @@ public class MediaPlaybackService extends Service {
                     switch (focusChange) {
                         case AudioManager.AUDIOFOCUS_LOSS:
                         case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                            if (sIsPlaying) {
-                                if (isNativeTtsMode) {
-                                    pauseNativeTts();
-                                } else {
-                                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                            boolean isCallOrRing = false;
+                            try {
+                                if (audioManager != null) {
+                                    int mode = audioManager.getMode();
+                                    isCallOrRing = (mode == AudioManager.MODE_IN_CALL || 
+                                                    mode == AudioManager.MODE_IN_COMMUNICATION || 
+                                                    mode == AudioManager.MODE_RINGTONE);
+                                }
+                            } catch (Throwable ignored) {}
+
+                            // If user enabled "playAlongOtherApps" (default true), only pause for calls & ringtones
+                            if (isCallOrRing || !playAlongOtherApps) {
+                                if (sIsPlaying) {
+                                    pausedBySystem = true;
+                                    if (isNativeTtsMode) {
+                                        pauseNativeTts();
+                                    } else {
+                                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                                    }
                                 }
                             }
                             break;
+
                         case AudioManager.AUDIOFOCUS_GAIN:
-                            if (!sIsPlaying) {
+                            if (pausedBySystem && !sIsPlaying) {
+                                pausedBySystem = false;
                                 if (isNativeTtsMode) {
                                     resumeNativeTts();
                                 } else {
@@ -967,6 +1047,12 @@ public class MediaPlaybackService extends Service {
         }
 
         stopSelf();
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        // If playback is currently active, preserve foreground service so audio continues uninterrupted
     }
 
     @Override

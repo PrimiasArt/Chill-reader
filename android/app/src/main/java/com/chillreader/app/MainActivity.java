@@ -303,6 +303,29 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public void setPlayAlongOtherApps(boolean enable) {
+            try {
+                MediaPlaybackService.setPlayAlong(MainActivity.this, enable);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+
+        @JavascriptInterface
+        public boolean isPlayAlongOtherApps() {
+            try {
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                if (service != null) {
+                    return service.isPlayAlongOtherApps();
+                }
+                android.content.SharedPreferences prefs = getSharedPreferences(MediaPlaybackService.PREFS_NAME, Context.MODE_PRIVATE);
+                return prefs.getBoolean(MediaPlaybackService.PREF_PLAY_ALONG, true);
+            } catch (Throwable t) {
+                return true;
+            }
+        }
+
+        @JavascriptInterface
         public boolean isBatteryOptimizationIgnored() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 try {
@@ -518,6 +541,20 @@ public class MainActivity extends BridgeActivity {
             return;
         }
         super.onBackPressed();
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        try {
+            if (level >= TRIM_MEMORY_BACKGROUND) {
+                WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+                if (webView != null) {
+                    webView.clearCache(false);
+                }
+                System.gc();
+            }
+        } catch (Throwable ignored) {}
     }
 
     @Override

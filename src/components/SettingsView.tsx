@@ -936,6 +936,23 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
             />
             <span>Bôi sáng câu đang đọc trong văn bản</span>
           </label>
+
+          <label className="flex items-start sm:items-center gap-2.5 cursor-pointer select-none text-xs text-zinc-300 sm:col-span-2 bg-zinc-950/50 p-2.5 rounded-xl border border-amber-500/20 hover:border-amber-500/40 transition-colors">
+            <input
+              type="checkbox"
+              checked={ttsSettings.playAlongOtherApps !== false}
+              onChange={(e) => {
+                const val = e.target.checked;
+                onUpdateTtsSettings({ playAlongOtherApps: val });
+                ttsEngine.updateSettings({ playAlongOtherApps: val });
+              }}
+              className="w-4 h-4 accent-amber-500 rounded mt-0.5 sm:mt-0 shrink-0"
+            />
+            <div className="min-w-0">
+              <span className="font-semibold text-amber-300">Nghe cùng lúc với ứng dụng khác &amp; Game:</span>{' '}
+              <span className="text-zinc-400">Đọc truyện xuyên suốt kể cả khi mở game, làm việc hay lướt mạng xã hội (chỉ tạm dừng khi có cuộc gọi đến hoặc chuông báo).</span>
+            </div>
+          </label>
         </div>
       </div>
 

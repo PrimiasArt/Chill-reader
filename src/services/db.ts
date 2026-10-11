@@ -20,7 +20,8 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   pitch: 1.0,
   sleepTimerMinutes: null,
   highlightSentence: true,
-  autoNextChapter: true
+  autoNextChapter: true,
+  playAlongOtherApps: true
 };
 
 export interface ChapterMetadata {

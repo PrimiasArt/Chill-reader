@@ -99,7 +99,8 @@ class TTSEngine {
     pitch: 1.0,
     sleepTimerMinutes: null,
     highlightSentence: true,
-    autoNextChapter: true
+    autoNextChapter: true,
+    playAlongOtherApps: true
   };
 
   constructor() {
@@ -120,6 +121,11 @@ class TTSEngine {
           this.syncNativePlaybackIndex();
         }
       });
+
+      // Sync background audio focus coexistence with Android system
+      setTimeout(() => {
+        this.syncPlayAlongOtherApps(this.settings.playAlongOtherApps !== false);
+      }, 500);
 
       // Expose globally for Android WebView Bridge callbacks
       (window as any).ttsEngine = this;
@@ -408,6 +414,10 @@ class TTSEngine {
 
     if (newSettings.sleepTimerMinutes !== undefined) {
       this.setSleepTimer(newSettings.sleepTimerMinutes);
+    }
+
+    if (newSettings.playAlongOtherApps !== undefined) {
+      this.syncPlayAlongOtherApps(newSettings.playAlongOtherApps);
     }
 
     // Immediately update live playbackRate on all players
@@ -1253,6 +1263,17 @@ class TTSEngine {
       }
     } catch (e) {
       console.warn('Native AndroidMedia clear error:', e);
+    }
+  }
+
+  public syncPlayAlongOtherApps(enable: boolean) {
+    try {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.setPlayAlongOtherApps === 'function') {
+        androidMedia.setPlayAlongOtherApps(enable);
+      }
+    } catch (e) {
+      console.warn('Failed to sync playAlongOtherApps to AndroidMedia:', e);
     }
   }
 

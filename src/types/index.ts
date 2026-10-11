@@ -53,6 +53,7 @@ export interface TTSSettings {
   sleepTimerMinutes: number | null; // e.g. 15, 30, 45, or null
   highlightSentence: boolean;
   autoNextChapter: boolean;
+  playAlongOtherApps?: boolean;
 }
 
 export interface CrawlSearchResult {
