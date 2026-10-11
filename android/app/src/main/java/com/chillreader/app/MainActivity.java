@@ -226,6 +226,83 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public void startNativeChapterPlayback(
+            String chapterTitle,
+            String bookTitle,
+            String author,
+            String coverUrl,
+            String sentencesJson,
+            int startIndex,
+            float rate,
+            float pitch
+        ) {
+            try {
+                MediaPlaybackService.startNativeQueue(
+                    MainActivity.this,
+                    chapterTitle,
+                    bookTitle,
+                    author,
+                    coverUrl,
+                    sentencesJson,
+                    startIndex,
+                    rate,
+                    pitch
+                );
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+
+        @JavascriptInterface
+        public void pauseNative() {
+            try {
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                if (service != null) {
+                    service.pauseNativeTts();
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+
+        @JavascriptInterface
+        public void resumeNative() {
+            try {
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                if (service != null) {
+                    service.resumeNativeTts();
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+
+        @JavascriptInterface
+        public void jumpNativeSentence(int index) {
+            try {
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                if (service != null) {
+                    service.jumpToNativeSentence(index);
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+
+        @JavascriptInterface
+        public int getNativePlaybackIndex() {
+            try {
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                if (service != null && service.isNativeTtsMode()) {
+                    return service.getNativeSentenceIndex();
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+            return -1;
+        }
+
+        @JavascriptInterface
         public boolean isBatteryOptimizationIgnored() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 try {

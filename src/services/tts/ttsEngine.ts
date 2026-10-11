@@ -113,6 +113,14 @@ class TTSEngine {
       // Initialize custom pronunciation dictionary
       pronunciationService.init().catch(() => {});
 
+      // Sync native playback index when app regains focus/visibility
+      window.addEventListener('focus', () => this.syncNativePlaybackIndex());
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          this.syncNativePlaybackIndex();
+        }
+      });
+
       // Expose globally for Android WebView Bridge callbacks
       (window as any).ttsEngine = this;
     }
@@ -530,7 +538,12 @@ class TTSEngine {
       if (this.isOnlineVoice() && this.activePlayer && this.activePlayer.src) {
         this.activePlayer.play().catch(() => {});
       } else if (this.isNativeVoice()) {
-        this.speakCurrentSentence();
+        const androidMedia = (window as any).AndroidMedia;
+        if (androidMedia && typeof androidMedia.resumeNative === 'function') {
+          androidMedia.resumeNative();
+        } else {
+          this.speakCurrentSentence();
+        }
       } else if (this.synth) {
         this.synth.resume();
       }
@@ -545,6 +558,24 @@ class TTSEngine {
       ambientAudioService.setSound(ambientAudioService.getType());
     }
     this.notifyState('playing');
+
+    if (this.isNativeVoice()) {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.startNativeChapterPlayback === 'function') {
+        androidMedia.startNativeChapterPlayback(
+          this.currentChapterTitle || 'Đang nghe truyện',
+          this.currentBookTitle || 'Chill Reader',
+          this.currentAuthor || '',
+          this.currentCoverUrl || '',
+          JSON.stringify(this.sentences),
+          this.currentSentenceIndex,
+          this.settings.rate || 1.0,
+          this.settings.pitch || 1.0
+        );
+        return;
+      }
+    }
+
     this.speakCurrentSentence();
   }
 
@@ -556,7 +587,9 @@ class TTSEngine {
       if (this.audioPlayers[1]) this.audioPlayers[1].pause();
     } else if (this.isNativeVoice()) {
       const androidMedia = (window as any).AndroidMedia;
-      if (androidMedia && typeof androidMedia.stopNative === 'function') {
+      if (androidMedia && typeof androidMedia.pauseNative === 'function') {
+        androidMedia.pauseNative();
+      } else if (androidMedia && typeof androidMedia.stopNative === 'function') {
         androidMedia.stopNative();
       }
     } else if (this.synth) {
@@ -618,6 +651,16 @@ class TTSEngine {
     const wasPlaying = this.state === 'playing';
     this.playbackToken++;
     this.playerLoadedSentenceIndex = [-1, -1];
+
+    if (this.isNativeVoice()) {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.jumpNativeSentence === 'function') {
+        androidMedia.jumpNativeSentence(index);
+      }
+      this.currentSentenceIndex = index;
+      this.notifySentence(index, this.sentences[index]);
+      return;
+    }
 
     if (this.audioPlayers[0]) {
       this.audioPlayers[0].pause();
@@ -968,6 +1011,39 @@ class TTSEngine {
     console.warn('Native TTS error on utterance:', utteranceId);
     this.currentSentenceIndex++;
     this.speakCurrentSentence();
+  }
+
+  public onNativeSentenceIndex(index: number) {
+    if (index >= 0 && index < this.sentences.length) {
+      this.currentSentenceIndex = index;
+      this.notifySentence(index, this.sentences[index]);
+    }
+  }
+
+  public onNativeChapterComplete() {
+    this.stop();
+    this.listeners.forEach(l => l.onChapterComplete?.());
+  }
+
+  public onNativeStateChange(state: TTSState) {
+    if (this.state !== state) {
+      this.state = state;
+      this.listeners.forEach(l => l.onStateChange?.(state));
+      this.updateMediaSessionPlaybackState();
+    }
+  }
+
+  public syncNativePlaybackIndex() {
+    if (this.isNativeVoice() && this.state === 'playing') {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.getNativePlaybackIndex === 'function') {
+        const idx = androidMedia.getNativePlaybackIndex();
+        if (typeof idx === 'number' && idx >= 0 && idx < this.sentences.length) {
+          this.currentSentenceIndex = idx;
+          this.notifySentence(idx, this.sentences[idx]);
+        }
+      }
+    }
   }
 
   private playBrowserTTS(sentence: string, currentToken: number) {

@@ -12,10 +12,15 @@ import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -26,16 +31,23 @@ import androidx.media.app.NotificationCompat.MediaStyle;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.json.JSONArray;
 
 /**
  * Foreground Audio Playback Service for Chill Reader.
  * - Guarantees background audio continuity without sleep stutter (WakeLock + WifiLock).
+ * - Implements Native Offline TextToSpeech queue directly in Java so local voices read
+ *   persistently through the night without dependency on paused WebViews.
  * - Integrates seamlessly with Android 11+ System Media Player & Lock Screen controls.
+ * - Handles Audio Focus changes (pauses on calls/navigation, resumes automatically).
  */
 public class MediaPlaybackService extends Service {
-    public static final String CHANNEL_ID = "chill_reader_playback_channel_v2";
+    public static final String CHANNEL_ID = "chill_reader_playback_v3";
     public static final int NOTIFICATION_ID = 9021;
 
     public static final String ACTION_PLAY_PAUSE = "com.chillreader.ACTION_PLAY_PAUSE";
@@ -45,6 +57,7 @@ public class MediaPlaybackService extends Service {
 
     public static final String ACTION_UPDATE_PLAYBACK = "com.chillreader.ACTION_UPDATE_PLAYBACK";
     public static final String ACTION_CLEAR_PLAYBACK = "com.chillreader.ACTION_CLEAR_PLAYBACK";
+    public static final String ACTION_START_NATIVE_QUEUE = "com.chillreader.ACTION_START_NATIVE_QUEUE";
 
     public static final String EXTRA_CHAPTER_TITLE = "extra_chapter_title";
     public static final String EXTRA_BOOK_TITLE = "extra_book_title";
@@ -53,6 +66,10 @@ public class MediaPlaybackService extends Service {
     public static final String EXTRA_COVER_URL = "extra_cover_url";
     public static final String EXTRA_CURRENT_SENTENCE = "extra_current_sentence";
     public static final String EXTRA_TOTAL_SENTENCES = "extra_total_sentences";
+    public static final String EXTRA_SENTENCES_JSON = "extra_sentences_json";
+    public static final String EXTRA_START_INDEX = "extra_start_index";
+    public static final String EXTRA_RATE = "extra_rate";
+    public static final String EXTRA_PITCH = "extra_pitch";
 
     private static volatile MediaPlaybackService sInstance = null;
     private static volatile boolean sIsPlaying = false;
@@ -64,6 +81,19 @@ public class MediaPlaybackService extends Service {
 
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
+
+    private AudioManager audioManager;
+    private AudioManager.OnAudioFocusChangeListener audioFocusChangeListener;
+    private AudioFocusRequest audioFocusRequest;
+
+    // Native Offline TextToSpeech queue
+    private TextToSpeech nativeTts;
+    private volatile boolean isNativeTtsReady = false;
+    private final List<String> nativeSentences = new ArrayList<>();
+    private volatile int nativeSentenceIndex = 0;
+    private volatile float nativeRate = 1.0f;
+    private volatile float nativePitch = 1.0f;
+    private volatile boolean isNativeTtsMode = false;
 
     private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
     private volatile String lastCoverUrl = null;
@@ -96,7 +126,6 @@ public class MediaPlaybackService extends Service {
     ) {
         try {
             if (context == null) return;
-            // If not playing and service is not already running, DO NOT start the service!
             if (!isPlaying && sInstance == null) {
                 return;
             }
@@ -118,10 +147,43 @@ public class MediaPlaybackService extends Service {
                     context.startService(intent);
                 }
             } else {
-                // If not playing, only send intent to existing service instance
                 if (sInstance != null) {
                     context.startService(intent);
                 }
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public static void startNativeQueue(
+        Context context,
+        String chapterTitle,
+        String bookTitle,
+        String author,
+        String coverUrl,
+        String sentencesJson,
+        int startIndex,
+        float rate,
+        float pitch
+    ) {
+        try {
+            if (context == null) return;
+            Intent intent = new Intent(context, MediaPlaybackService.class);
+            intent.setAction(ACTION_START_NATIVE_QUEUE);
+            intent.putExtra(EXTRA_CHAPTER_TITLE, chapterTitle);
+            intent.putExtra(EXTRA_BOOK_TITLE, bookTitle);
+            intent.putExtra(EXTRA_AUTHOR, author);
+            intent.putExtra(EXTRA_COVER_URL, coverUrl);
+            intent.putExtra(EXTRA_SENTENCES_JSON, sentencesJson);
+            intent.putExtra(EXTRA_START_INDEX, startIndex);
+            intent.putExtra(EXTRA_RATE, rate);
+            intent.putExtra(EXTRA_PITCH, pitch);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, intent);
+            } else {
+                context.startService(intent);
             }
         } catch (Throwable t) {
             t.printStackTrace();
@@ -146,10 +208,9 @@ public class MediaPlaybackService extends Service {
         createNotificationChannel();
         initMediaSession();
         registerMediaReceiver();
+        initNativeTts();
 
-        // Android 8.0+ contract: When service is started via startForegroundService,
-        // we MUST call startForeground immediately within 5 seconds.
-        // Calling startForeground in onCreate() guarantees that this contract is ALWAYS fulfilled.
+        // Android 8.0+ contract: guarantee startForeground is called immediately
         try {
             Notification initNotification = buildNotification(
                 "Chill Reader",
@@ -185,7 +246,23 @@ public class MediaPlaybackService extends Service {
             return START_NOT_STICKY;
         }
 
+        if (ACTION_START_NATIVE_QUEUE.equals(action)) {
+            currentChapterTitle = intent.getStringExtra(EXTRA_CHAPTER_TITLE);
+            currentBookTitle = intent.getStringExtra(EXTRA_BOOK_TITLE);
+            currentAuthor = intent.getStringExtra(EXTRA_AUTHOR);
+            String coverUrl = intent.getStringExtra(EXTRA_COVER_URL);
+            String sentencesJson = intent.getStringExtra(EXTRA_SENTENCES_JSON);
+            int startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0);
+            float rate = intent.getFloatExtra(EXTRA_RATE, 1.0f);
+            float pitch = intent.getFloatExtra(EXTRA_PITCH, 1.0f);
+
+            loadAndStartNativeQueue(sentencesJson, startIndex, rate, pitch, coverUrl);
+            return START_STICKY;
+        }
+
         if (ACTION_UPDATE_PLAYBACK.equals(action)) {
+            // Web / Online audio update
+            isNativeTtsMode = false;
             currentChapterTitle = intent.getStringExtra(EXTRA_CHAPTER_TITLE);
             currentBookTitle = intent.getStringExtra(EXTRA_BOOK_TITLE);
             currentAuthor = intent.getStringExtra(EXTRA_AUTHOR);
@@ -195,6 +272,9 @@ public class MediaPlaybackService extends Service {
             currentTotalSentences = intent.getIntExtra(EXTRA_TOTAL_SENTENCES, 0);
 
             sIsPlaying = isPlaying;
+            if (isPlaying) {
+                requestAudioFocus();
+            }
             renderNotificationAndForeground(isPlaying, coverUrl);
             return START_STICKY;
         }
@@ -203,23 +283,28 @@ public class MediaPlaybackService extends Service {
     }
 
     private void createNotificationChannel() {
-        notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && notificationManager != null) {
-            try {
-                notificationManager.deleteNotificationChannel("chill_reader_playback_channel");
-            } catch (Exception ignored) {}
+        try {
+            notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && notificationManager != null) {
+                try {
+                    notificationManager.deleteNotificationChannel("chill_reader_playback_channel");
+                    notificationManager.deleteNotificationChannel("chill_reader_playback_channel_v2");
+                } catch (Throwable ignored) {}
 
-            NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "Trình phát âm thanh Chill Reader",
-                NotificationManager.IMPORTANCE_LOW
-            );
-            channel.setDescription("Điều khiển âm thanh Chill Reader trên màn hình khóa và thanh thông báo");
-            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-            channel.setShowBadge(false);
-            channel.setSound(null, null);
-            channel.enableVibration(false);
-            notificationManager.createNotificationChannel(channel);
+                NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Trình phát âm thanh Chill Reader",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                );
+                channel.setDescription("Điều khiển âm thanh Chill Reader trên màn hình khóa và thanh thông báo");
+                channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                channel.setShowBadge(true);
+                channel.setSound(null, null);
+                channel.enableVibration(false);
+                notificationManager.createNotificationChannel(channel);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
     }
 
@@ -235,38 +320,62 @@ public class MediaPlaybackService extends Service {
             mediaSession.setCallback(new MediaSessionCompat.Callback() {
                 @Override
                 public void onPlay() {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.play()");
+                    if (isNativeTtsMode) {
+                        resumeNativeTts();
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.play()");
+                    }
                 }
 
                 @Override
                 public void onPause() {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                    if (isNativeTtsMode) {
+                        pauseNativeTts();
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                    }
                 }
 
                 @Override
                 public void onSkipToNext() {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.nextSentence()");
+                    if (isNativeTtsMode) {
+                        jumpToNativeSentence(nativeSentenceIndex + 1);
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.nextSentence()");
+                    }
                 }
 
                 @Override
                 public void onSkipToPrevious() {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.previousSentence()");
+                    if (isNativeTtsMode) {
+                        jumpToNativeSentence(nativeSentenceIndex - 1);
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.previousSentence()");
+                    }
                 }
 
                 @Override
                 public void onStop() {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.stop()");
+                    if (isNativeTtsMode) {
+                        stopNativeTts();
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.stop()");
+                    }
                 }
 
                 @Override
                 public void onSeekTo(long pos) {
                     int sentenceIdx = (int) (pos / 1000L);
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.jumpToSentence(" + sentenceIdx + ")");
+                    if (isNativeTtsMode) {
+                        jumpToNativeSentence(sentenceIdx);
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.jumpToSentence(" + sentenceIdx + ")");
+                    }
                 }
             });
 
             mediaSession.setActive(true);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             e.printStackTrace();
         }
     }
@@ -280,13 +389,33 @@ public class MediaPlaybackService extends Service {
                 if (action == null) return;
 
                 if (ACTION_PLAY_PAUSE.equals(action)) {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.togglePlayPause()");
+                    if (isNativeTtsMode) {
+                        if (sIsPlaying) {
+                            pauseNativeTts();
+                        } else {
+                            resumeNativeTts();
+                        }
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.togglePlayPause()");
+                    }
                 } else if (ACTION_NEXT.equals(action)) {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.nextSentence()");
+                    if (isNativeTtsMode) {
+                        jumpToNativeSentence(nativeSentenceIndex + 1);
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.nextSentence()");
+                    }
                 } else if (ACTION_PREV.equals(action)) {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.previousSentence()");
+                    if (isNativeTtsMode) {
+                        jumpToNativeSentence(nativeSentenceIndex - 1);
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.previousSentence()");
+                    }
                 } else if (ACTION_STOP.equals(action)) {
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.stop()");
+                    if (isNativeTtsMode) {
+                        stopNativeTts();
+                    } else {
+                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.stop()");
+                    }
                 }
             }
         };
@@ -303,6 +432,235 @@ public class MediaPlaybackService extends Service {
             registerReceiver(mediaActionReceiver, filter);
         }
         isReceiverRegistered = true;
+    }
+
+    private void initNativeTts() {
+        if (nativeTts != null) return;
+        try {
+            nativeTts = new TextToSpeech(getApplicationContext(), status -> {
+                if (status == TextToSpeech.SUCCESS) {
+                    try {
+                        int result = nativeTts.setLanguage(new Locale("vi", "VN"));
+                        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                            nativeTts.setLanguage(new Locale("vi"));
+                        }
+                    } catch (Throwable ignored) {}
+                    isNativeTtsReady = true;
+
+                    nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                        @Override
+                        public void onStart(String utteranceId) {
+                            MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
+                        }
+
+                        @Override
+                        public void onDone(String utteranceId) {
+                            if (!isNativeTtsMode || !sIsPlaying) return;
+                            nativeSentenceIndex++;
+                            playCurrentNativeSentence();
+                        }
+
+                        @Override
+                        public void onError(String utteranceId) {
+                            if (!isNativeTtsMode || !sIsPlaying) return;
+                            nativeSentenceIndex++;
+                            playCurrentNativeSentence();
+                        }
+                    });
+
+                    if (isNativeTtsMode && sIsPlaying) {
+                        playCurrentNativeSentence();
+                    }
+                } else {
+                    isNativeTtsReady = false;
+                }
+            });
+        } catch (Throwable t) {
+            t.printStackTrace();
+            isNativeTtsReady = false;
+        }
+    }
+
+    private void loadAndStartNativeQueue(String sentencesJson, int startIndex, float rate, float pitch, String coverUrl) {
+        try {
+            nativeSentences.clear();
+            if (sentencesJson != null && !sentencesJson.trim().isEmpty()) {
+                JSONArray arr = new JSONArray(sentencesJson);
+                for (int i = 0; i < arr.length(); i++) {
+                    nativeSentences.add(arr.getString(i));
+                }
+            }
+            nativeSentenceIndex = Math.max(0, Math.min(startIndex, Math.max(0, nativeSentences.size() - 1)));
+            nativeRate = rate;
+            nativePitch = pitch;
+            isNativeTtsMode = true;
+            sIsPlaying = true;
+            lastCoverUrl = coverUrl;
+
+            requestAudioFocus();
+            acquireLocks();
+
+            if (isNativeTtsReady && nativeTts != null) {
+                playCurrentNativeSentence();
+            } else {
+                renderNotificationAndForeground(true, coverUrl);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    private void playCurrentNativeSentence() {
+        if (!isNativeTtsMode || !sIsPlaying) return;
+        if (nativeTts == null || !isNativeTtsReady) return;
+        if (nativeSentenceIndex < 0 || nativeSentenceIndex >= nativeSentences.size()) {
+            sIsPlaying = false;
+            releaseLocks();
+            renderNotificationAndForeground(false, lastCoverUrl);
+            MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeChapterComplete && window.ttsEngine.onNativeChapterComplete()");
+            return;
+        }
+
+        currentSentenceIndex = nativeSentenceIndex;
+        currentTotalSentences = nativeSentences.size();
+
+        acquireLocks();
+        renderNotificationAndForeground(true, lastCoverUrl);
+
+        try {
+            nativeTts.setSpeechRate(nativeRate);
+            nativeTts.setPitch(nativePitch);
+            String sentence = nativeSentences.get(nativeSentenceIndex);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, null, "utt_" + nativeSentenceIndex);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+
+        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
+    }
+
+    public void pauseNativeTts() {
+        sIsPlaying = false;
+        if (nativeTts != null) {
+            try {
+                nativeTts.stop();
+            } catch (Throwable ignored) {}
+        }
+        releaseLocks();
+        renderNotificationAndForeground(false, lastCoverUrl);
+        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeStateChange && window.ttsEngine.onNativeStateChange('paused')");
+    }
+
+    public void resumeNativeTts() {
+        if (!isNativeTtsMode) return;
+        requestAudioFocus();
+        acquireLocks();
+        sIsPlaying = true;
+        playCurrentNativeSentence();
+        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeStateChange && window.ttsEngine.onNativeStateChange('playing')");
+    }
+
+    public void stopNativeTts() {
+        isNativeTtsMode = false;
+        sIsPlaying = false;
+        if (nativeTts != null) {
+            try {
+                nativeTts.stop();
+            } catch (Throwable ignored) {}
+        }
+        nativeSentences.clear();
+        nativeSentenceIndex = 0;
+        clearPlayback();
+    }
+
+    public void jumpToNativeSentence(int index) {
+        if (!isNativeTtsMode || nativeSentences.isEmpty()) return;
+        nativeSentenceIndex = Math.max(0, Math.min(index, nativeSentences.size() - 1));
+        if (sIsPlaying) {
+            playCurrentNativeSentence();
+        } else {
+            currentSentenceIndex = nativeSentenceIndex;
+            renderNotificationAndForeground(false, lastCoverUrl);
+            MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
+        }
+    }
+
+    public int getNativeSentenceIndex() {
+        return nativeSentenceIndex;
+    }
+
+    public boolean isNativeTtsMode() {
+        return isNativeTtsMode;
+    }
+
+    public boolean isNativeTtsReady() {
+        return isNativeTtsReady && nativeTts != null;
+    }
+
+    private void requestAudioFocus() {
+        try {
+            if (audioManager == null) {
+                audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            }
+            if (audioManager == null) return;
+
+            if (audioFocusChangeListener == null) {
+                audioFocusChangeListener = focusChange -> {
+                    switch (focusChange) {
+                        case AudioManager.AUDIOFOCUS_LOSS:
+                        case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                            if (sIsPlaying) {
+                                if (isNativeTtsMode) {
+                                    pauseNativeTts();
+                                } else {
+                                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                                }
+                            }
+                            break;
+                        case AudioManager.AUDIOFOCUS_GAIN:
+                            if (!sIsPlaying) {
+                                if (isNativeTtsMode) {
+                                    resumeNativeTts();
+                                } else {
+                                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.play()");
+                                }
+                            }
+                            break;
+                    }
+                };
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                AudioAttributes playbackAttributes = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build();
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(playbackAttributes)
+                    .setAcceptsDelayedFocusGain(true)
+                    .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                    .build();
+                audioManager.requestAudioFocus(audioFocusRequest);
+            } else {
+                audioManager.requestAudioFocus(audioFocusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    private void abandonAudioFocus() {
+        try {
+            if (audioManager != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+                    audioManager.abandonAudioFocusRequest(audioFocusRequest);
+                } else if (audioFocusChangeListener != null) {
+                    audioManager.abandonAudioFocus(audioFocusChangeListener);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     private void acquireLocks() {
@@ -352,71 +710,70 @@ public class MediaPlaybackService extends Service {
     }
 
     private void renderNotificationAndForeground(boolean isPlaying, String coverUrl) {
-        initMediaSession();
-
-        if (isPlaying) {
-            acquireLocks();
-        } else {
-            releaseLocks();
-        }
-
-        String title = (currentChapterTitle != null && !currentChapterTitle.trim().isEmpty())
-            ? currentChapterTitle.trim() : "Đang phát âm thanh";
-        String book = (currentBookTitle != null && !currentBookTitle.trim().isEmpty())
-            ? currentBookTitle.trim() : "Chill Reader";
-        String auth = (currentAuthor != null && !currentAuthor.trim().isEmpty())
-            ? currentAuthor.trim() : "Chill Reader";
-        String subtitle = book;
-        if (currentAuthor != null && !currentAuthor.trim().isEmpty() && !book.equals(currentAuthor)) {
-            subtitle = book + " · " + currentAuthor;
-        }
-
-        // Update MediaSession state
-        long actions = PlaybackStateCompat.ACTION_PLAY |
-                       PlaybackStateCompat.ACTION_PAUSE |
-                       PlaybackStateCompat.ACTION_PLAY_PAUSE |
-                       PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
-                       PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
-                       PlaybackStateCompat.ACTION_STOP |
-                       PlaybackStateCompat.ACTION_SEEK_TO;
-
-        PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
-            .setActions(actions)
-            .setState(
-                isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
-                (long) currentSentenceIndex * 1000L,
-                isPlaying ? 1.0f : 0.0f
-            );
-        if (mediaSession != null) {
-            mediaSession.setPlaybackState(stateBuilder.build());
-        }
-
-        // Artwork resolution
-        Bitmap artBitmap = resolveCoverBitmap(coverUrl);
-
-        if (mediaSession != null) {
-            MediaMetadataCompat.Builder metaBuilder = new MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, auth)
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, book)
-                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle);
-
-            if (currentTotalSentences > 0) {
-                metaBuilder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, (long) currentTotalSentences * 1000L);
-            }
-
-            if (artBitmap != null) {
-                metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artBitmap);
-                metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artBitmap);
-            }
-            mediaSession.setMetadata(metaBuilder.build());
-            mediaSession.setActive(true);
-        }
-
-        Notification notification = buildNotification(title, subtitle, book, isPlaying, artBitmap);
-
+        Notification notification = null;
         try {
+            initMediaSession();
+
+            if (isPlaying) {
+                acquireLocks();
+            } else {
+                releaseLocks();
+            }
+
+            String title = (currentChapterTitle != null && !currentChapterTitle.trim().isEmpty())
+                ? currentChapterTitle.trim() : "Đang phát âm thanh";
+            String book = (currentBookTitle != null && !currentBookTitle.trim().isEmpty())
+                ? currentBookTitle.trim() : "Chill Reader";
+            String auth = (currentAuthor != null && !currentAuthor.trim().isEmpty())
+                ? currentAuthor.trim() : "Chill Reader";
+            String subtitle = book;
+            if (currentAuthor != null && !currentAuthor.trim().isEmpty() && !book.equals(currentAuthor)) {
+                subtitle = book + " · " + currentAuthor;
+            }
+
+            long actions = PlaybackStateCompat.ACTION_PLAY |
+                           PlaybackStateCompat.ACTION_PAUSE |
+                           PlaybackStateCompat.ACTION_PLAY_PAUSE |
+                           PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
+                           PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
+                           PlaybackStateCompat.ACTION_STOP |
+                           PlaybackStateCompat.ACTION_SEEK_TO;
+
+            PlaybackStateCompat.Builder stateBuilder = new PlaybackStateCompat.Builder()
+                .setActions(actions)
+                .setState(
+                    isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
+                    (long) currentSentenceIndex * 1000L,
+                    isPlaying ? 1.0f : 0.0f
+                );
+            if (mediaSession != null) {
+                mediaSession.setPlaybackState(stateBuilder.build());
+            }
+
+            Bitmap artBitmap = resolveCoverBitmap(coverUrl);
+
+            if (mediaSession != null) {
+                MediaMetadataCompat.Builder metaBuilder = new MediaMetadataCompat.Builder()
+                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, auth)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, book)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle);
+
+                if (currentTotalSentences > 0) {
+                    metaBuilder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, (long) currentTotalSentences * 1000L);
+                }
+
+                if (artBitmap != null) {
+                    metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artBitmap);
+                    metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artBitmap);
+                }
+                mediaSession.setMetadata(metaBuilder.build());
+                mediaSession.setActive(true);
+            }
+
+            notification = buildNotification(title, subtitle, book, isPlaying, artBitmap);
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             } else {
@@ -427,7 +784,7 @@ public class MediaPlaybackService extends Service {
             }
         } catch (Throwable e) {
             e.printStackTrace();
-            if (notificationManager != null) {
+            if (notificationManager != null && notification != null) {
                 try {
                     notificationManager.notify(NOTIFICATION_ID, notification);
                 } catch (Throwable ignored) {}
@@ -575,7 +932,15 @@ public class MediaPlaybackService extends Service {
 
     private void clearPlayback() {
         sIsPlaying = false;
+        isNativeTtsMode = false;
         releaseLocks();
+        abandonAudioFocus();
+
+        if (nativeTts != null) {
+            try {
+                nativeTts.stop();
+            } catch (Throwable ignored) {}
+        }
 
         if (mediaSession != null) {
             try {
@@ -609,7 +974,18 @@ public class MediaPlaybackService extends Service {
         super.onDestroy();
         sInstance = null;
         sIsPlaying = false;
+        isNativeTtsMode = false;
         releaseLocks();
+        abandonAudioFocus();
+
+        if (nativeTts != null) {
+            try {
+                nativeTts.stop();
+                nativeTts.shutdown();
+            } catch (Throwable ignored) {}
+            nativeTts = null;
+            isNativeTtsReady = false;
+        }
 
         if (isReceiverRegistered && mediaActionReceiver != null) {
             try {
