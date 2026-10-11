@@ -548,7 +548,13 @@ class TTSEngine {
   public play() {
     if (this.sentences.length === 0) return;
 
-    this.startBackgroundAudioContext();
+    if (this.isNativeVoice()) {
+      this.stopBackgroundAudioContext();
+      this.silentAudio?.pause();
+    } else {
+      this.startBackgroundAudioContext();
+      this.silentAudio?.play().catch(() => {});
+    }
 
     if (this.state === 'paused') {
       if (this.isOnlineVoice() && this.activePlayer && this.activePlayer.src) {
@@ -563,17 +569,14 @@ class TTSEngine {
       } else if (this.synth) {
         this.synth.resume();
       }
-      this.silentAudio?.play().catch(() => {});
       this.notifyState('playing');
       return;
     }
 
     this.consecutiveErrors = 0;
-    this.silentAudio?.play().catch(() => {});
     if (ambientAudioService.getType() !== 'off') {
       ambientAudioService.setSound(ambientAudioService.getType());
     }
-    this.notifyState('playing');
 
     if (this.isNativeVoice()) {
       const androidMedia = (window as any).AndroidMedia;
@@ -587,12 +590,15 @@ class TTSEngine {
           JSON.stringify(processedSentences),
           this.currentSentenceIndex,
           this.settings.rate || 1.0,
-          this.settings.pitch || 1.0
+          this.settings.pitch || 1.0,
+          this.settings.voiceURI || ''
         );
+        this.notifyState('playing');
         return;
       }
     }
 
+    this.notifyState('playing');
     this.speakCurrentSentence();
   }
 
@@ -999,7 +1005,8 @@ class TTSEngine {
         JSON.stringify(processedSentences),
         this.currentSentenceIndex,
         this.settings.rate || 1.0,
-        this.settings.pitch || 1.0
+        this.settings.pitch || 1.0,
+        this.settings.voiceURI || ''
       );
       return;
     }
@@ -1257,6 +1264,7 @@ class TTSEngine {
    * Communicates with MainActivity.java via JavascriptInterface 'AndroidMedia'
    */
   private updateNativeNotification(isPlaying: boolean) {
+    if (this.isNativeVoice()) return;
     if (this.state === 'idle' && !isPlaying) return;
     try {
       const androidMedia = (window as any).AndroidMedia;

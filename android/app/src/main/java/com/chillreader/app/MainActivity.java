@@ -168,6 +168,10 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void stopNative() {
             try {
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                if (service != null) {
+                    service.stopNativeTts();
+                }
                 if (nativeTts != null) {
                     runOnUiThread(() -> {
                         try {
@@ -236,6 +240,21 @@ public class MainActivity extends BridgeActivity {
             float rate,
             float pitch
         ) {
+            startNativeChapterPlayback(chapterTitle, bookTitle, author, coverUrl, sentencesJson, startIndex, rate, pitch, "");
+        }
+
+        @JavascriptInterface
+        public void startNativeChapterPlayback(
+            String chapterTitle,
+            String bookTitle,
+            String author,
+            String coverUrl,
+            String sentencesJson,
+            int startIndex,
+            float rate,
+            float pitch,
+            String voiceURI
+        ) {
             try {
                 MediaPlaybackService.startNativeQueue(
                     MainActivity.this,
@@ -246,7 +265,8 @@ public class MainActivity extends BridgeActivity {
                     sentencesJson,
                     startIndex,
                     rate,
-                    pitch
+                    pitch,
+                    voiceURI
                 );
             } catch (Throwable t) {
                 t.printStackTrace();

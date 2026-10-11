@@ -26,6 +26,8 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.speech.tts.Voice;
+import java.util.Set;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -81,6 +83,7 @@ public class MediaPlaybackService extends Service {
     public static final String EXTRA_RATE = "extra_rate";
     public static final String EXTRA_PITCH = "extra_pitch";
     public static final String EXTRA_PLAY_ALONG_OTHER_APPS = "extra_play_along_other_apps";
+    public static final String EXTRA_VOICE_URI = "extra_voice_uri";
 
     private static volatile MediaPlaybackService sInstance = null;
     private static volatile boolean sIsPlaying = false;
@@ -101,7 +104,6 @@ public class MediaPlaybackService extends Service {
     private AudioManager audioManager;
     private AudioManager.OnAudioFocusChangeListener audioFocusChangeListener;
     private AudioFocusRequest audioFocusRequest;
-    private AudioManager.AudioPlaybackCallback playbackCallback;
     private BroadcastReceiver alarmAlertReceiver;
     private boolean isAlarmReceiverRegistered = false;
 
@@ -113,6 +115,7 @@ public class MediaPlaybackService extends Service {
     private volatile float nativeRate = 1.0f;
     private volatile float nativePitch = 1.0f;
     private volatile boolean isNativeTtsMode = false;
+    private volatile String selectedVoiceName = "";
 
     private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
     private volatile String lastCoverUrl = null;
@@ -184,7 +187,8 @@ public class MediaPlaybackService extends Service {
         String sentencesJson,
         int startIndex,
         float rate,
-        float pitch
+        float pitch,
+        String voiceURI
     ) {
         try {
             if (context == null) return;
@@ -198,6 +202,7 @@ public class MediaPlaybackService extends Service {
             intent.putExtra(EXTRA_START_INDEX, startIndex);
             intent.putExtra(EXTRA_RATE, rate);
             intent.putExtra(EXTRA_PITCH, pitch);
+            intent.putExtra(EXTRA_VOICE_URI, voiceURI);
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(context, intent);
@@ -207,6 +212,20 @@ public class MediaPlaybackService extends Service {
         } catch (Throwable t) {
             t.printStackTrace();
         }
+    }
+
+    public static void startNativeQueue(
+        Context context,
+        String chapterTitle,
+        String bookTitle,
+        String author,
+        String coverUrl,
+        String sentencesJson,
+        int startIndex,
+        float rate,
+        float pitch
+    ) {
+        startNativeQueue(context, chapterTitle, bookTitle, author, coverUrl, sentencesJson, startIndex, rate, pitch, "");
     }
 
     public static void stop(Context context) {
@@ -316,13 +335,18 @@ public class MediaPlaybackService extends Service {
             int startIndex = intent.getIntExtra(EXTRA_START_INDEX, 0);
             float rate = intent.getFloatExtra(EXTRA_RATE, 1.0f);
             float pitch = intent.getFloatExtra(EXTRA_PITCH, 1.0f);
+            String voiceURI = intent.getStringExtra(EXTRA_VOICE_URI);
 
-            loadAndStartNativeQueue(sentencesJson, startIndex, rate, pitch, coverUrl);
+            loadAndStartNativeQueue(sentencesJson, startIndex, rate, pitch, coverUrl, voiceURI);
             return START_STICKY;
         }
 
         if (ACTION_UPDATE_PLAYBACK.equals(action)) {
             // Web / Online audio update
+            if (isNativeTtsMode) {
+                // If currently running in native offline TTS mode, DO NOT override or cancel native queue!
+                return START_STICKY;
+            }
             isNativeTtsMode = false;
             currentChapterTitle = intent.getStringExtra(EXTRA_CHAPTER_TITLE);
             currentBookTitle = intent.getStringExtra(EXTRA_BOOK_TITLE);
@@ -506,22 +530,7 @@ public class MediaPlaybackService extends Service {
             audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         }
 
-        // 1. Android 8.0+ System Audio Playback Callback
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && playbackCallback == null) {
-            playbackCallback = new AudioManager.AudioPlaybackCallback() {
-                @Override
-                public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
-                    checkHighPriorityAudio(configs);
-                }
-            };
-            try {
-                if (audioManager != null) {
-                    audioManager.registerAudioPlaybackCallback(playbackCallback, mainHandler);
-                }
-            } catch (Throwable ignored) {}
-        }
-
-        // 2. BroadcastReceiver for Clock / Alarm Alerts (Samsung, Google, Xiaomi, AOSP Clocks)
+        // BroadcastReceiver for Clock / Alarm Alerts (Samsung, Google, Xiaomi, Oppo, Vivo, Asus, AOSP Clocks)
         if (!isAlarmReceiverRegistered) {
             alarmAlertReceiver = new BroadcastReceiver() {
                 @Override
@@ -539,7 +548,7 @@ public class MediaPlaybackService extends Service {
                                 MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
                             }
                         }
-                    } else if (action.contains("ALARM_DISMISSED") || action.contains("ALARM_DONE") || action.contains("ALARM_SNOOZE") || action.contains("ALARM_STOP")) {
+                    } else if (action.contains("ALARM_DISMISSED") || action.contains("ALARM_DONE") || action.contains("ALARM_SNOOZE") || action.contains("ALARM_STOP") || action.contains("DISMISS")) {
                         // Alarm dismissed or snoozed
                         if (pausedBySystem && !sIsPlaying) {
                             pausedBySystem = false;
@@ -559,6 +568,10 @@ public class MediaPlaybackService extends Service {
             filter.addAction("com.samsung.sec.android.clockpackage.alarm.ALARM_ALERT");
             filter.addAction("com.sec.android.app.clockpackage.alarm.ALARM_ALERT");
             filter.addAction("com.android.alarmclock.ALARM_ALERT");
+            filter.addAction("com.oppo.alarmclock.ALARM_ALERT");
+            filter.addAction("com.coloros.alarmclock.ALARM_ALERT");
+            filter.addAction("com.vivo.alarmclock.ALARM_ALERT");
+            filter.addAction("com.asus.alarmclock.ALARM_ALERT");
             filter.addAction("com.android.deskclock.ALARM_DISMISSED");
             filter.addAction("com.android.deskclock.ALARM_DONE");
             filter.addAction("com.android.deskclock.ALARM_SNOOZE");
@@ -566,6 +579,8 @@ public class MediaPlaybackService extends Service {
             filter.addAction("com.google.android.deskclock.action.ALARM_DONE");
             filter.addAction("com.samsung.sec.android.clockpackage.alarm.ALARM_STOP");
             filter.addAction("com.sec.android.app.clockpackage.alarm.ALARM_DISMISS");
+            filter.addAction("com.oppo.alarmclock.ALARM_DISMISSED");
+            filter.addAction("com.vivo.alarmclock.ALARM_DISMISSED");
 
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -595,48 +610,40 @@ public class MediaPlaybackService extends Service {
         return false;
     }
 
-    private boolean isAlarmActive(List<AudioPlaybackConfiguration> configs) {
-        if (configs == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null) {
-            try {
-                configs = audioManager.getActivePlaybackConfigurations();
-            } catch (Throwable ignored) {}
-        }
-        if (configs != null) {
-            for (AudioPlaybackConfiguration cfg : configs) {
-                if (cfg == null) continue;
-                AudioAttributes attrs = cfg.getAudioAttributes();
-                if (attrs != null && attrs.getUsage() == AudioAttributes.USAGE_ALARM) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    private boolean isHighPriorityAudioActive() {
+        return isCallActive();
     }
 
-    private boolean isHighPriorityAudioActive(List<AudioPlaybackConfiguration> configs) {
-        return isCallActive() || isAlarmActive(configs);
-    }
-
-    private void checkHighPriorityAudio(List<AudioPlaybackConfiguration> configs) {
-        boolean highPriorityActive = isHighPriorityAudioActive(configs);
-
-        if (highPriorityActive) {
-            if (sIsPlaying) {
-                if (isNativeTtsMode) {
-                    pauseNativeTts(true);
-                } else {
-                    pausedBySystem = true;
-                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+    private void applySelectedVoice() {
+        if (nativeTts == null || !isNativeTtsReady) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                if (selectedVoiceName != null && !selectedVoiceName.trim().isEmpty()) {
+                    String cleanVoiceName = selectedVoiceName.startsWith("native:") 
+                        ? selectedVoiceName.substring(7) 
+                        : selectedVoiceName;
+                    
+                    if (!cleanVoiceName.isEmpty() && !"android".equalsIgnoreCase(cleanVoiceName)) {
+                        Set<Voice> voices = nativeTts.getVoices();
+                        if (voices != null) {
+                            for (Voice v : voices) {
+                                if (v != null && (cleanVoiceName.equalsIgnoreCase(v.getName()) || 
+                                                  cleanVoiceName.equalsIgnoreCase(v.getLocale().toLanguageTag()))) {
+                                    nativeTts.setVoice(v);
+                                    return;
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        } else if (pausedBySystem && !sIsPlaying) {
-            // High priority audio has finished (alarm silenced/dismissed or call ended)
-            pausedBySystem = false;
-            if (isNativeTtsMode) {
-                resumeNativeTts();
-            } else {
-                MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.play()");
+            // Fallback default Vietnamese locale
+            int result = nativeTts.setLanguage(new Locale("vi", "VN"));
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                nativeTts.setLanguage(new Locale("vi"));
             }
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
     }
 
@@ -645,13 +652,6 @@ public class MediaPlaybackService extends Service {
         try {
             nativeTts = new TextToSpeech(getApplicationContext(), status -> {
                 if (status == TextToSpeech.SUCCESS) {
-                    try {
-                        int result = nativeTts.setLanguage(new Locale("vi", "VN"));
-                        if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                            nativeTts.setLanguage(new Locale("vi"));
-                        }
-                    } catch (Throwable ignored) {}
-
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         try {
                             AudioAttributes aa = new AudioAttributes.Builder()
@@ -663,6 +663,7 @@ public class MediaPlaybackService extends Service {
                     }
 
                     isNativeTtsReady = true;
+                    applySelectedVoice();
 
                     nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                         @Override
@@ -691,6 +692,11 @@ public class MediaPlaybackService extends Service {
                                 playCurrentNativeSentence();
                             });
                         }
+
+                        @Override
+                        public void onStop(String utteranceId, boolean interrupted) {
+                            cancelTtsWatchdog();
+                        }
                     });
 
                     if (isNativeTtsMode && sIsPlaying) {
@@ -706,8 +712,9 @@ public class MediaPlaybackService extends Service {
         }
     }
 
-    private void loadAndStartNativeQueue(String sentencesJson, int startIndex, float rate, float pitch, String coverUrl) {
+    private void loadAndStartNativeQueue(String sentencesJson, int startIndex, float rate, float pitch, String coverUrl, String voiceURI) {
         try {
+            selectedVoiceName = voiceURI != null ? voiceURI : "";
             nativeSentences.clear();
             if (sentencesJson != null && !sentencesJson.trim().isEmpty()) {
                 JSONArray arr = new JSONArray(sentencesJson);
@@ -726,8 +733,10 @@ public class MediaPlaybackService extends Service {
             acquireLocks();
 
             if (isNativeTtsReady && nativeTts != null) {
+                applySelectedVoice();
                 playCurrentNativeSentence();
             } else {
+                initNativeTts();
                 renderNotificationAndForeground(true, coverUrl);
             }
         } catch (Throwable t) {
@@ -910,7 +919,7 @@ public class MediaPlaybackService extends Service {
                     switch (focusChange) {
                         case AudioManager.AUDIOFOCUS_LOSS:
                         case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                            boolean highPriority = isHighPriorityAudioActive(null);
+                            boolean highPriority = isHighPriorityAudioActive();
 
                             // If user enabled "playAlongOtherApps" (default true), only pause for alarms, calls & ringtones
                             if (highPriority || !playAlongOtherApps) {
@@ -1314,12 +1323,6 @@ public class MediaPlaybackService extends Service {
             isReceiverRegistered = false;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null && playbackCallback != null) {
-            try {
-                audioManager.unregisterAudioPlaybackCallback(playbackCallback);
-            } catch (Exception ignored) {}
-            playbackCallback = null;
-        }
 
         if (isAlarmReceiverRegistered && alarmAlertReceiver != null) {
             try {
