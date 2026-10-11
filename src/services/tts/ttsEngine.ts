@@ -288,12 +288,18 @@ class TTSEngine {
     const v = voiceURI !== undefined ? voiceURI : this.settings.voiceURI;
     if (!v) return true;
     if (v.startsWith('native:')) return false;
-    return v.startsWith('edge:') || v.startsWith('google:') || v.startsWith('vi-VN-');
+    return v.startsWith('edge:') || v.startsWith('google:');
   }
 
   public isNativeVoice(voiceURI?: string): boolean {
     const v = voiceURI !== undefined ? voiceURI : this.settings.voiceURI;
-    return !!v && v.startsWith('native:');
+    if (!v) return false;
+    if (v.startsWith('native:')) return true;
+    const isAndroid = typeof window !== 'undefined' && Boolean((window as any).AndroidMedia);
+    if (isAndroid && !this.isOnlineVoice(v)) {
+      return true;
+    }
+    return false;
   }
 
   public getVoices(): SpeechSynthesisVoice[] {
@@ -385,7 +391,7 @@ class TTSEngine {
       this.testAudio.playbackRate = effRate;
       this.testAudio.defaultPlaybackRate = effRate;
       await this.testAudio.play();
-    } else if (voiceURI.startsWith('native:')) {
+    } else if (this.isNativeVoice(voiceURI)) {
       const androidMedia = (window as any).AndroidMedia;
       if (androidMedia && typeof androidMedia.speakNative === 'function') {
         androidMedia.speakNative(sampleText, this.settings.rate || 1.0, this.settings.pitch || 1.0, 'test_sample');
@@ -572,12 +578,13 @@ class TTSEngine {
     if (this.isNativeVoice()) {
       const androidMedia = (window as any).AndroidMedia;
       if (androidMedia && typeof androidMedia.startNativeChapterPlayback === 'function') {
+        const processedSentences = this.sentences.map(s => pronunciationService.applyRules(s));
         androidMedia.startNativeChapterPlayback(
           this.currentChapterTitle || 'Đang nghe truyện',
           this.currentBookTitle || 'Chill Reader',
           this.currentAuthor || '',
           this.currentCoverUrl || '',
-          JSON.stringify(this.sentences),
+          JSON.stringify(processedSentences),
           this.currentSentenceIndex,
           this.settings.rate || 1.0,
           this.settings.pitch || 1.0
@@ -982,6 +989,20 @@ class TTSEngine {
 
   private playNativeAndroidTTS(sentence: string, currentToken: number) {
     const androidMedia = (window as any).AndroidMedia;
+    if (androidMedia && typeof androidMedia.startNativeChapterPlayback === 'function') {
+      const processedSentences = this.sentences.map(s => pronunciationService.applyRules(s));
+      androidMedia.startNativeChapterPlayback(
+        this.currentChapterTitle || 'Đang nghe truyện',
+        this.currentBookTitle || 'Chill Reader',
+        this.currentAuthor || '',
+        this.currentCoverUrl || '',
+        JSON.stringify(processedSentences),
+        this.currentSentenceIndex,
+        this.settings.rate || 1.0,
+        this.settings.pitch || 1.0
+      );
+      return;
+    }
     if (androidMedia && typeof androidMedia.speakNative === 'function') {
       const processedText = pronunciationService.applyRules(sentence);
       const utteranceId = `utt_${currentToken}_${this.currentSentenceIndex}`;

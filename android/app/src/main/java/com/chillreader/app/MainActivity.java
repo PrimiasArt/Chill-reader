@@ -547,7 +547,7 @@ public class MainActivity extends BridgeActivity {
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
         try {
-            if (level >= TRIM_MEMORY_BACKGROUND) {
+            if (level >= TRIM_MEMORY_COMPLETE && !MediaPlaybackService.isPlaying()) {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
                 if (webView != null) {
                     webView.clearCache(false);
