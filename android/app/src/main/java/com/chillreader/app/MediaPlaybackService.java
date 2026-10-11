@@ -16,10 +16,13 @@ import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
@@ -95,6 +98,9 @@ public class MediaPlaybackService extends Service {
     private AudioManager audioManager;
     private AudioManager.OnAudioFocusChangeListener audioFocusChangeListener;
     private AudioFocusRequest audioFocusRequest;
+    private AudioManager.AudioPlaybackCallback playbackCallback;
+    private BroadcastReceiver alarmAlertReceiver;
+    private boolean isAlarmReceiverRegistered = false;
 
     // Native Offline TextToSpeech queue
     private TextToSpeech nativeTts;
@@ -252,6 +258,7 @@ public class MediaPlaybackService extends Service {
         createNotificationChannel();
         initMediaSession();
         registerMediaReceiver();
+        registerAlarmAndCallMonitor();
         initNativeTts();
 
         // Android 8.0+ contract: guarantee startForeground is called immediately
@@ -484,6 +491,167 @@ public class MediaPlaybackService extends Service {
         isReceiverRegistered = true;
     }
 
+    /**
+     * High-Priority Audio Monitoring:
+     * Guarantees alarms (Google Clock, Samsung Clock, Xiaomi Clock), incoming calls (Cellular),
+     * and VoIP communication apps (Zalo, Instagram, Messenger, WhatsApp) immediately pause
+     * Chill Reader so alarms and calls are never missed or drowned out.
+     */
+    private void registerAlarmAndCallMonitor() {
+        if (audioManager == null) {
+            audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        }
+
+        // 1. Android 8.0+ System Audio Playback Callback
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && playbackCallback == null) {
+            playbackCallback = new AudioManager.AudioPlaybackCallback() {
+                @Override
+                public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
+                    checkHighPriorityAudio(configs);
+                }
+            };
+            try {
+                if (audioManager != null) {
+                    audioManager.registerAudioPlaybackCallback(playbackCallback, new Handler(Looper.getMainLooper()));
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        // 2. BroadcastReceiver for Clock / Alarm Alerts (Samsung, Google, Xiaomi, AOSP Clocks)
+        if (!isAlarmReceiverRegistered) {
+            alarmAlertReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    String action = intent != null ? intent.getAction() : null;
+                    if (action == null) return;
+
+                    if (action.contains("ALARM_ALERT") || action.contains("alarm_alert")) {
+                        // Alarm started ringing! Pause reading immediately so user wakes up!
+                        if (sIsPlaying) {
+                            pausedBySystem = true;
+                            if (isNativeTtsMode) {
+                                pauseNativeTts();
+                            } else {
+                                MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                            }
+                        }
+                    } else if (action.contains("ALARM_DISMISSED") || action.contains("ALARM_DONE") || action.contains("ALARM_SNOOZE") || action.contains("ALARM_STOP")) {
+                        // Alarm dismissed or snoozed
+                        if (pausedBySystem && !sIsPlaying) {
+                            pausedBySystem = false;
+                            if (isNativeTtsMode) {
+                                resumeNativeTts();
+                            } else {
+                                MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.play()");
+                            }
+                        }
+                    }
+                }
+            };
+
+            IntentFilter filter = new IntentFilter();
+            filter.addAction("com.android.deskclock.ALARM_ALERT");
+            filter.addAction("com.google.android.deskclock.action.ALARM_ALERT");
+            filter.addAction("com.samsung.sec.android.clockpackage.alarm.ALARM_ALERT");
+            filter.addAction("com.sec.android.app.clockpackage.alarm.ALARM_ALERT");
+            filter.addAction("com.android.alarmclock.ALARM_ALERT");
+            filter.addAction("com.android.deskclock.ALARM_DISMISSED");
+            filter.addAction("com.android.deskclock.ALARM_DONE");
+            filter.addAction("com.android.deskclock.ALARM_SNOOZE");
+            filter.addAction("com.google.android.deskclock.action.ALARM_DISMISSED");
+            filter.addAction("com.google.android.deskclock.action.ALARM_DONE");
+            filter.addAction("com.samsung.sec.android.clockpackage.alarm.ALARM_STOP");
+            filter.addAction("com.sec.android.app.clockpackage.alarm.ALARM_DISMISS");
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(alarmAlertReceiver, filter, Context.RECEIVER_EXPORTED);
+                } else {
+                    registerReceiver(alarmAlertReceiver, filter);
+                }
+                isAlarmReceiverRegistered = true;
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        }
+    }
+
+    private void checkHighPriorityAudio(List<AudioPlaybackConfiguration> configs) {
+        if (configs == null) return;
+        boolean highPriorityActive = false;
+
+        for (AudioPlaybackConfiguration cfg : configs) {
+            if (cfg == null) continue;
+            AudioAttributes attrs = cfg.getAudioAttributes();
+            if (attrs == null) continue;
+
+            int usage = attrs.getUsage();
+            // Alarm, Ringtone, or Active Call / VoIP communication
+            if (usage == AudioAttributes.USAGE_ALARM ||
+                usage == AudioAttributes.USAGE_NOTIFICATION_RINGTONE ||
+                usage == AudioAttributes.USAGE_VOICE_COMMUNICATION ||
+                usage == AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING) {
+                highPriorityActive = true;
+                break;
+            }
+        }
+
+        if (highPriorityActive) {
+            if (sIsPlaying) {
+                pausedBySystem = true;
+                if (isNativeTtsMode) {
+                    pauseNativeTts();
+                } else {
+                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                }
+            }
+        } else if (pausedBySystem && !sIsPlaying) {
+            // High priority audio has finished (alarm silenced/dismissed or call ended)
+            pausedBySystem = false;
+            if (isNativeTtsMode) {
+                resumeNativeTts();
+            } else {
+                MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.play()");
+            }
+        }
+    }
+
+    private boolean isHighPriorityAudioActive() {
+        try {
+            if (audioManager == null) {
+                audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            }
+            if (audioManager != null) {
+                int mode = audioManager.getMode();
+                if (mode == AudioManager.MODE_IN_CALL || 
+                    mode == AudioManager.MODE_IN_COMMUNICATION || 
+                    mode == AudioManager.MODE_RINGTONE) {
+                    return true;
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    List<AudioPlaybackConfiguration> configs = audioManager.getActivePlaybackConfigurations();
+                    if (configs != null) {
+                        for (AudioPlaybackConfiguration cfg : configs) {
+                            if (cfg == null) continue;
+                            AudioAttributes attrs = cfg.getAudioAttributes();
+                            if (attrs != null) {
+                                int usage = attrs.getUsage();
+                                if (usage == AudioAttributes.USAGE_ALARM ||
+                                    usage == AudioAttributes.USAGE_NOTIFICATION_RINGTONE ||
+                                    usage == AudioAttributes.USAGE_VOICE_COMMUNICATION ||
+                                    usage == AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     private void initNativeTts() {
         if (nativeTts != null) return;
         try {
@@ -675,18 +843,10 @@ public class MediaPlaybackService extends Service {
                     switch (focusChange) {
                         case AudioManager.AUDIOFOCUS_LOSS:
                         case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
-                            boolean isCallOrRing = false;
-                            try {
-                                if (audioManager != null) {
-                                    int mode = audioManager.getMode();
-                                    isCallOrRing = (mode == AudioManager.MODE_IN_CALL || 
-                                                    mode == AudioManager.MODE_IN_COMMUNICATION || 
-                                                    mode == AudioManager.MODE_RINGTONE);
-                                }
-                            } catch (Throwable ignored) {}
+                            boolean highPriority = isHighPriorityAudioActive();
 
-                            // If user enabled "playAlongOtherApps" (default true), only pause for calls & ringtones
-                            if (isCallOrRing || !playAlongOtherApps) {
+                            // If user enabled "playAlongOtherApps" (default true), only pause for alarms, calls & ringtones
+                            if (highPriority || !playAlongOtherApps) {
                                 if (sIsPlaying) {
                                     pausedBySystem = true;
                                     if (isNativeTtsMode) {
@@ -1078,6 +1238,20 @@ public class MediaPlaybackService extends Service {
                 unregisterReceiver(mediaActionReceiver);
             } catch (Exception ignored) {}
             isReceiverRegistered = false;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioManager != null && playbackCallback != null) {
+            try {
+                audioManager.unregisterAudioPlaybackCallback(playbackCallback);
+            } catch (Exception ignored) {}
+            playbackCallback = null;
+        }
+
+        if (isAlarmReceiverRegistered && alarmAlertReceiver != null) {
+            try {
+                unregisterReceiver(alarmAlertReceiver);
+            } catch (Exception ignored) {}
+            isAlarmReceiverRegistered = false;
         }
 
         if (mediaSession != null) {

@@ -950,7 +950,7 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
             />
             <div className="min-w-0">
               <span className="font-semibold text-amber-300">Nghe cùng lúc với ứng dụng khác &amp; Game:</span>{' '}
-              <span className="text-zinc-400">Đọc truyện xuyên suốt kể cả khi mở game, làm việc hay lướt mạng xã hội (chỉ tạm dừng khi có cuộc gọi đến hoặc chuông báo).</span>
+              <span className="text-zinc-400">Đọc truyện xuyên suốt kể cả khi mở game, làm việc hay lướt mạng xã hội. <strong>Luôn ưu tiên nhường cho Chuông báo thức &amp; Cuộc gọi (Điện thoại, Zalo, Instagram, Messenger)</strong> để không bao giờ bị lỡ việc.</span>
             </div>
           </label>
         </div>
