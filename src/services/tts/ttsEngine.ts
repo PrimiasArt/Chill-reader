@@ -118,12 +118,88 @@ class TTSEngine {
     }
   }
 
+  private audioContext: AudioContext | null = null;
+  private silentSource: AudioBufferSourceNode | null = null;
+
   private setupSilentAudio() {
-    // 1-sample silent wav to keep mobile browser audio context and background thread alive
-    const silentWavBase64 = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-    this.silentAudio = new Audio(silentWavBase64);
-    this.silentAudio.loop = true;
-    this.silentAudio.volume = 0.01;
+    // Generate valid 2-second silent WAV so browser audio engine keeps mobile audio pipeline alive
+    try {
+      const sampleRate = 8000;
+      const numSamples = sampleRate * 2;
+      const buffer = new ArrayBuffer(44 + numSamples);
+      const view = new DataView(buffer);
+      const writeStr = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+      };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + numSamples, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true); // PCM
+      view.setUint16(22, 1, true); // mono
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate, true);
+      view.setUint16(32, 1, true);
+      view.setUint16(34, 8, true);
+      writeStr(36, 'data');
+      view.setUint32(40, numSamples, true);
+      new Uint8Array(buffer).fill(128, 44);
+
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      this.silentAudio = new Audio('data:audio/wav;base64,' + btoa(binary));
+      this.silentAudio.loop = true;
+      this.silentAudio.volume = 0.01;
+    } catch {
+      // Fallback 1-sample wav
+      this.silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+      this.silentAudio.loop = true;
+      this.silentAudio.volume = 0.01;
+    }
+  }
+
+  private startBackgroundAudioContext() {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!this.audioContext) {
+        this.audioContext = new AudioCtx();
+      }
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
+      if (!this.silentSource) {
+        const buffer = this.audioContext.createBuffer(1, this.audioContext.sampleRate * 2, this.audioContext.sampleRate);
+        const source = this.audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        const gain = this.audioContext.createGain();
+        gain.gain.value = 0.0001; // Inaudible, holds AudioTrack pipeline open
+        source.connect(gain);
+        gain.connect(this.audioContext.destination);
+        source.start(0);
+        this.silentSource = source;
+      }
+    } catch (e) {
+      console.warn('Silent AudioContext start error:', e);
+    }
+  }
+
+  private stopBackgroundAudioContext() {
+    try {
+      if (this.silentSource) {
+        this.silentSource.stop();
+        this.silentSource.disconnect();
+        this.silentSource = null;
+      }
+      if (this.audioContext && this.audioContext.state === 'running') {
+        this.audioContext.suspend().catch(() => {});
+      }
+    } catch {}
   }
 
   public getEffectivePlaybackRate(): number {
@@ -443,6 +519,8 @@ class TTSEngine {
   public play() {
     if (this.sentences.length === 0) return;
 
+    this.startBackgroundAudioContext();
+
     if (this.state === 'paused') {
       if (this.isOnlineVoice() && this.activePlayer && this.activePlayer.src) {
         this.activePlayer.play().catch(() => {});
@@ -467,6 +545,7 @@ class TTSEngine {
 
   public pause() {
     this.playbackToken++; // Invalidate pending async transitions
+    this.stopBackgroundAudioContext();
     if (this.isOnlineVoice()) {
       if (this.audioPlayers[0]) this.audioPlayers[0].pause();
       if (this.audioPlayers[1]) this.audioPlayers[1].pause();
@@ -485,6 +564,7 @@ class TTSEngine {
   public stop() {
     this.playbackToken++; // Invalidate pending async transitions
     this.playerLoadedSentenceIndex = [-1, -1];
+    this.stopBackgroundAudioContext();
 
     if (ambientAudioService.getType() !== 'off') {
       ambientAudioService.setSound('off');

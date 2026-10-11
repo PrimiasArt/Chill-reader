@@ -22,7 +22,8 @@ import {
   Share2,
   SpellCheck,
   CloudRain,
-  Plus
+  Plus,
+  Lock
 } from 'lucide-react';
 import { db } from '../services/db';
 import { supabaseSync, type SupabaseConfig } from '../services/sync/supabaseSync';
@@ -936,6 +937,43 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
             <span>Bôi sáng câu đang đọc trong văn bản</span>
           </label>
         </div>
+      </div>
+
+      {/* BACKGROUND & LOCK SCREEN PLAYBACK OPTIMIZATION */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Lock className="w-5 h-5 text-amber-400" />
+            <h3 className="font-semibold text-sm text-zinc-100">Phát âm thanh khi khóa màn hình (Màn hình khóa)</h3>
+          </div>
+          <span className="text-xs text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+            Foreground Service
+          </span>
+        </div>
+        <p className="text-xs text-zinc-400 leading-relaxed">
+          Đã kích hoạt <strong>Dịch vụ chạy ngầm ưu tiên (Foreground Media Service)</strong> kèm khóa xung nhịp CPU (WakeLock) và mạng Wi-Fi (WifiLock) giúp nghe truyện trơn tru suốt đêm, không bị tạm dừng khi tắt màn hình và hiển thị đầy đủ bộ điều khiển trên Màn hình khóa của Android.
+        </p>
+
+        {typeof window !== 'undefined' && Boolean((window as any).AndroidMedia) && (
+          <div className="pt-2 border-t border-zinc-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="text-xs text-zinc-300">
+              <span className="font-medium text-amber-300">Mẹo cho Android (Xiaomi / Samsung / Oppo):</span>
+              <p className="text-zinc-400 mt-0.5">Cho phép ứng dụng chạy nền không hạn chế để hệ điều hành không tự ý đóng app khi màn hình tắt lâu.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const androidMedia = (window as any).AndroidMedia;
+                if (androidMedia && typeof androidMedia.requestBatteryOptimizationExemption === 'function') {
+                  androidMedia.requestBatteryOptimizationExemption();
+                }
+              }}
+              className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shadow-xs"
+            >
+              Mở cài đặt Tối ưu pin
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 5. AMBIENT BACKGROUND SOUNDS */}
