@@ -38,8 +38,8 @@ export type UpdateState = {
 
 type UpdateListener = (state: UpdateState) => void;
 
-const GITHUB_REPO = 'PrimiasArt/Chill-Player';
-export const FALLBACK_DOWNLOAD_URL = `https://github.com/${GITHUB_REPO}/releases/download/android-apk-latest/ChillPlayer-v1.0.apk`;
+const GITHUB_REPO = 'PrimiasArt/Chill-reader';
+export const FALLBACK_DOWNLOAD_URL = `https://github.com/${GITHUB_REPO}/releases/download/android-apk-latest/ChillReader-v1.0.apk`;
 
 class AppUpdaterService {
   private listeners: Set<UpdateListener> = new Set();

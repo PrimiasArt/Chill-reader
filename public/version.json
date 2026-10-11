@@ -2,7 +2,7 @@
   "versionName": "1.0.12",
   "versionCode": 112,
   "buildTime": "2026-10-11T11:40:00Z",
-  "downloadUrl": "https://github.com/PrimiasArt/Chill-Player/releases/download/android-apk-latest/ChillPlayer-v1.0.apk",
+  "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "local",
   "releaseNotes": "Bản phát hành chính thức nâng cấp tính năng đọc offline Native TTS, chống tràn player và cải thiện hiệu năng"
 }
