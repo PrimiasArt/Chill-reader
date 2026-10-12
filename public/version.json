@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.15",
-  "versionCode": 115,
-  "buildTime": "2026-10-13T01:45:00Z",
+  "versionName": "1.0.16",
+  "versionCode": 116,
+  "buildTime": "2026-10-13T04:00:00Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "local",
-  "releaseNotes": "Bản cập nhật v1.0.15: Khắc phục triệt để lỗi lặp/giật âm tiết (stutter loop) trên giọng offline, giữ kết nối âm thanh và UI phát liên tục khi tắt màn hình hoặc timeout không bao giờ bị ngừng."
+  "releaseNotes": "Bản cập nhật v1.0.16: Khắc phục triệt để lỗi tự dừng/tắt app khi nghe lâu (chống tràn IPC/Notification, gỡ silent AudioTrack, tự động chuyển chương liền mạch không ngắt service, bổ sung crash protection)."
 }

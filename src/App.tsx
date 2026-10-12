@@ -160,7 +160,8 @@ export const App: React.FC = () => {
       onChapterComplete: () => {
         if (ttsSettings.autoNextChapter && activeStory && activeStoryChapters.length > 0) {
           if (currentChapterNumber < activeStoryChapters.length) {
-            handleSelectChapter(currentChapterNumber + 1, true);
+            const nextNum = currentChapterNumber + 1;
+            setCurrentChapterNumber(nextNum);
           }
         }
       }

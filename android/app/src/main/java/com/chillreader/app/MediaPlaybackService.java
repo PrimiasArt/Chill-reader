@@ -37,7 +37,11 @@ import android.util.Base64;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
+import java.io.File;
+import java.io.FileWriter;
 import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
@@ -125,6 +129,8 @@ public class MediaPlaybackService extends Service {
     private volatile String lastCoverUrl = null;
     private volatile Bitmap lastCoverBitmap = null;
     private volatile String loadingCoverUrl = null;
+    private static Bitmap cachedLauncherBitmap = null;
+    private Runnable gracefulTeardownRunnable = null;
 
     private String currentChapterTitle = "";
     private String currentBookTitle = "";
@@ -235,45 +241,8 @@ public class MediaPlaybackService extends Service {
     }
 
     public synchronized void startSilentNativeAudio() {
-        try {
-            if (silentAudioTrack != null) return;
-            int sampleRate = 8000;
-            int minBufferSize = AudioTrack.getMinBufferSize(
-                sampleRate,
-                AudioFormat.CHANNEL_OUT_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            );
-            int bufferSize = Math.max(minBufferSize, sampleRate * 2);
-            byte[] silentData = new byte[bufferSize];
-
-            AudioAttributes attributes = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build();
-
-            AudioFormat format = new AudioFormat.Builder()
-                .setSampleRate(sampleRate)
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                .build();
-
-            silentAudioTrack = new AudioTrack(
-                attributes,
-                format,
-                bufferSize,
-                AudioTrack.MODE_STATIC,
-                AudioManager.AUDIO_SESSION_ID_GENERATE
-            );
-
-            silentAudioTrack.write(silentData, 0, silentData.length);
-            silentAudioTrack.setLoopPoints(0, silentData.length / 2, -1);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                silentAudioTrack.setVolume(0.001f);
-            }
-            silentAudioTrack.play();
-        } catch (Throwable t) {
-            t.printStackTrace();
-        }
+        // Native TextToSpeech maintains an official AudioTrack and foreground media session.
+        // No-op to prevent OS background battery management termination.
     }
 
     public synchronized void stopSilentNativeAudio() {
@@ -388,6 +357,24 @@ public class MediaPlaybackService extends Service {
     public void onCreate() {
         super.onCreate();
         sInstance = this;
+
+        final Thread.UncaughtExceptionHandler serviceDefaultHandler = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            try {
+                android.util.Log.e("ChillReaderCrash", "Service crash on thread: " + thread.getName(), throwable);
+                File crashFile = new File(getCacheDir(), "chillreader_crash.log");
+                FileWriter writer = new FileWriter(crashFile, true);
+                writer.write("--- SERVICE CRASH at " + new java.util.Date() + " on " + thread.getName() + " ---\n");
+                StringWriter sw = new StringWriter();
+                PrintWriter pw = new PrintWriter(sw);
+                throwable.printStackTrace(pw);
+                writer.write(sw.toString() + "\n\n");
+                writer.close();
+            } catch (Throwable ignored) {}
+            if (serviceDefaultHandler != null) {
+                serviceDefaultHandler.uncaughtException(thread, throwable);
+            }
+        });
 
         try {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -801,11 +788,12 @@ public class MediaPlaybackService extends Service {
                         @Override
                         public void onDone(String utteranceId) {
                             mainHandler.post(() -> {
-                                cancelTtsWatchdog();
-                                if (!isNativeTtsMode || !sIsPlaying) return;
                                 if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                    // Ignore stale callback from older utterance, DO NOT cancel current watchdog!
                                     return;
                                 }
+                                cancelTtsWatchdog();
+                                if (!isNativeTtsMode || !sIsPlaying) return;
                                 nativeSentenceIndex++;
                                 playCurrentNativeSentence();
                             });
@@ -814,11 +802,11 @@ public class MediaPlaybackService extends Service {
                         @Override
                         public void onError(String utteranceId) {
                             mainHandler.post(() -> {
-                                cancelTtsWatchdog();
-                                if (!isNativeTtsMode || !sIsPlaying) return;
                                 if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
                                     return;
                                 }
+                                cancelTtsWatchdog();
+                                if (!isNativeTtsMode || !sIsPlaying) return;
                                 nativeSentenceIndex++;
                                 playCurrentNativeSentence();
                             });
@@ -826,9 +814,21 @@ public class MediaPlaybackService extends Service {
 
                         @Override
                         public void onStop(String utteranceId, boolean interrupted) {
-                            cancelTtsWatchdog();
-                            // Note: onStop is fired whenever an utterance is stopped or flushed by QUEUE_FLUSH.
-                            // Never auto-restart here to prevent stutter/infinite loops!
+                            mainHandler.post(() -> {
+                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                    return; // Stale stop event from previously flushed utterance: ignore!
+                                }
+                                cancelTtsWatchdog();
+                                if (!isNativeTtsMode || !sIsPlaying || pausedBySystem) return;
+
+                                // Interrupted mid-sentence by transient system event: advance cleanly to next sentence
+                                mainHandler.postDelayed(() -> {
+                                    if (isNativeTtsMode && sIsPlaying && !pausedBySystem) {
+                                        nativeSentenceIndex++;
+                                        playCurrentNativeSentence();
+                                    }
+                                }, 250);
+                            });
                         }
                     });
 
@@ -847,6 +847,7 @@ public class MediaPlaybackService extends Service {
 
     private void loadAndStartNativeQueue(String sentencesJson, int startIndex, float rate, float pitch, String coverUrl, String voiceURI) {
         try {
+            cancelGracefulTeardown();
             selectedVoiceName = voiceURI != null ? voiceURI : "";
             nativeSentences.clear();
             if (sentencesJson != null && !sentencesJson.trim().isEmpty()) {
@@ -867,6 +868,7 @@ public class MediaPlaybackService extends Service {
 
             if (isNativeTtsReady && nativeTts != null) {
                 applySelectedVoice();
+                renderNotificationAndForeground(true, coverUrl);
                 playCurrentNativeSentence();
             } else {
                 initNativeTts();
@@ -892,9 +894,8 @@ public class MediaPlaybackService extends Service {
 
         if (nativeSentenceIndex >= nativeSentences.size()) {
             sIsPlaying = false;
-            releaseLocks();
             cancelTtsWatchdog();
-            renderNotificationAndForeground(false, lastCoverUrl);
+            scheduleGracefulTeardown();
             MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeChapterComplete && window.ttsEngine.onNativeChapterComplete()");
             return;
         }
@@ -903,7 +904,29 @@ public class MediaPlaybackService extends Service {
         currentTotalSentences = nativeSentences.size();
 
         acquireLocks();
-        renderNotificationAndForeground(true, lastCoverUrl);
+
+        if (!isForegroundRunning) {
+            renderNotificationAndForeground(true, lastCoverUrl);
+        } else if (mediaSession != null) {
+            try {
+                long actions = PlaybackStateCompat.ACTION_PLAY |
+                               PlaybackStateCompat.ACTION_PAUSE |
+                               PlaybackStateCompat.ACTION_PLAY_PAUSE |
+                               PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
+                               PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
+                               PlaybackStateCompat.ACTION_STOP |
+                               PlaybackStateCompat.ACTION_SEEK_TO;
+                PlaybackStateCompat state = new PlaybackStateCompat.Builder()
+                    .setActions(actions)
+                    .setState(
+                        PlaybackStateCompat.STATE_PLAYING,
+                        (long) currentSentenceIndex * 1000L,
+                        1.0f
+                    )
+                    .build();
+                mediaSession.setPlaybackState(state);
+            } catch (Throwable ignored) {}
+        }
 
         try {
             nativeTts.setSpeechRate(nativeRate);
@@ -1010,6 +1033,7 @@ public class MediaPlaybackService extends Service {
     }
 
     public void stopNativeTts() {
+        cancelGracefulTeardown();
         isNativeTtsMode = false;
         sIsPlaying = false;
         stopSilentNativeAudio();
@@ -1191,6 +1215,24 @@ public class MediaPlaybackService extends Service {
                 wifiLock.release();
             }
         } catch (Exception ignored) {}
+    }
+
+    private void scheduleGracefulTeardown() {
+        cancelGracefulTeardown();
+        gracefulTeardownRunnable = () -> {
+            if (!sIsPlaying) {
+                releaseLocks();
+                renderNotificationAndForeground(false, lastCoverUrl);
+            }
+        };
+        mainHandler.postDelayed(gracefulTeardownRunnable, 25000L); // 25-second window for next chapter loading
+    }
+
+    private void cancelGracefulTeardown() {
+        if (gracefulTeardownRunnable != null) {
+            mainHandler.removeCallbacks(gracefulTeardownRunnable);
+            gracefulTeardownRunnable = null;
+        }
     }
 
     private void renderNotificationAndForeground(boolean isPlaying, String coverUrl) {
@@ -1410,7 +1452,10 @@ public class MediaPlaybackService extends Service {
 
         if (artBitmap == null) {
             try {
-                artBitmap = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
+                if (cachedLauncherBitmap == null) {
+                    cachedLauncherBitmap = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
+                }
+                artBitmap = cachedLauncherBitmap;
             } catch (Exception ignored) {}
         }
         return artBitmap;
@@ -1428,6 +1473,7 @@ public class MediaPlaybackService extends Service {
     }
 
     private void clearPlayback() {
+        cancelGracefulTeardown();
         sIsPlaying = false;
         isNativeTtsMode = false;
         isForegroundRunning = false;
@@ -1478,6 +1524,7 @@ public class MediaPlaybackService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        cancelGracefulTeardown();
         sInstance = null;
         sIsPlaying = false;
         isNativeTtsMode = false;
