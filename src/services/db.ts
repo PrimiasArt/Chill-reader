@@ -58,6 +58,8 @@ export interface OfflineAudioRecord {
   sentenceIndex: number;
   audioBlob: Blob;
   createdAt: number;
+  lastAccessedAt?: number;
+  sizeBytes?: number;
 }
 
 export class ChillReaderDB extends Dexie {
@@ -83,6 +85,10 @@ export class ChillReaderDB extends Dexie {
       settings: 'key',
       storyNotes: 'id, storyId, category, updatedAt',
       offlineAudioCache: 'id, storyId, chapterNumber, sentenceIndex'
+    });
+
+    this.version(3).stores({
+      offlineAudioCache: 'id, storyId, chapterNumber, sentenceIndex, createdAt, lastAccessedAt'
     });
   }
 
@@ -163,23 +169,95 @@ export class ChillReaderDB extends Dexie {
     await this.storyNotes.delete(noteId);
   }
 
-  // --- Offline TTS Audio Cache ---
+  // --- Offline TTS Audio Cache (Smart LRU Management) ---
   async getOfflineAudio(storyId: string, chapterNumber: number, sentenceIndex: number): Promise<Blob | null> {
     const id = `${storyId}_${chapterNumber}_${sentenceIndex}`;
     const record = await this.offlineAudioCache.get(id);
-    return record ? record.audioBlob : null;
+    if (record) {
+      // Touch lastAccessedAt in background without blocking audio playback
+      this.offlineAudioCache.update(id, { lastAccessedAt: Date.now() }).catch(() => {});
+      return record.audioBlob;
+    }
+    return null;
   }
 
   async saveOfflineAudio(storyId: string, chapterNumber: number, sentenceIndex: number, audioBlob: Blob): Promise<void> {
     const id = `${storyId}_${chapterNumber}_${sentenceIndex}`;
+    const now = Date.now();
     await this.offlineAudioCache.put({
       id,
       storyId,
       chapterNumber,
       sentenceIndex,
       audioBlob,
-      createdAt: Date.now()
+      createdAt: now,
+      lastAccessedAt: now,
+      sizeBytes: audioBlob.size || 0
     });
+  }
+
+  /**
+   * Smart LRU Cache Purge:
+   * 1. Purges records older than maxAgeDays (default: 14 days)
+   * 2. If remaining cache exceeds maxTotalBytes (default: 200MB), deletes least recently used audio first
+   */
+  async purgeOldAudioCache(maxAgeDays = 14, maxTotalBytes = 200 * 1024 * 1024): Promise<{ deletedCount: number; freedBytes: number }> {
+    try {
+      const now = Date.now();
+      const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+      const records = await this.offlineAudioCache.toArray();
+      if (!records || records.length === 0) return { deletedCount: 0, freedBytes: 0 };
+
+      let deletedCount = 0;
+      let freedBytes = 0;
+      const toDeleteIds: string[] = [];
+
+      // Pass 1: Exceeds max age
+      const remaining: OfflineAudioRecord[] = [];
+      for (const r of records) {
+        const lastAccess = r.lastAccessedAt || r.createdAt || 0;
+        const size = r.sizeBytes || r.audioBlob?.size || 0;
+        if (now - lastAccess > maxAgeMs) {
+          toDeleteIds.push(r.id);
+          deletedCount++;
+          freedBytes += size;
+        } else {
+          remaining.push(r);
+        }
+      }
+
+      // Pass 2: If total size still exceeds maxTotalBytes, delete LRU (least recently accessed first)
+      let totalBytes = remaining.reduce((acc, r) => acc + (r.sizeBytes || r.audioBlob?.size || 0), 0);
+      if (totalBytes > maxTotalBytes) {
+        remaining.sort((a, b) => (a.lastAccessedAt || a.createdAt || 0) - (b.lastAccessedAt || b.createdAt || 0));
+        for (const r of remaining) {
+          if (totalBytes <= maxTotalBytes) break;
+          const size = r.sizeBytes || r.audioBlob?.size || 0;
+          toDeleteIds.push(r.id);
+          deletedCount++;
+          freedBytes += size;
+          totalBytes -= size;
+        }
+      }
+
+      if (toDeleteIds.length > 0) {
+        await this.offlineAudioCache.bulkDelete(toDeleteIds);
+      }
+
+      return { deletedCount, freedBytes };
+    } catch {
+      return { deletedCount: 0, freedBytes: 0 };
+    }
+  }
+
+  async getAudioCacheStats(): Promise<{ totalRecords: number; totalBytes: number }> {
+    try {
+      const records = await this.offlineAudioCache.toArray();
+      const totalBytes = records.reduce((acc, r) => acc + (r.sizeBytes || r.audioBlob?.size || 0), 0);
+      return { totalRecords: records.length, totalBytes };
+    } catch {
+      return { totalRecords: 0, totalBytes: 0 };
+    }
   }
 
   async hasOfflineChapterAudio(storyId: string, chapterNumber: number, sentenceCount: number): Promise<boolean> {

@@ -178,3 +178,56 @@ function splitIntoLogicalChapters(text: string, wordsPerChapter: number): string
 
   return chapters.length > 0 ? chapters : [text];
 }
+
+/**
+ * Web Worker-assisted async parser:
+ * For files > 300KB, runs chapter splitting in a background Web Worker so UI remains 100% responsive.
+ */
+export async function parseTxtContentAsync(rawText: string, fallbackTitle: string = 'Truyện không tên'): Promise<ParsedBook> {
+  if (typeof Worker === 'undefined' || rawText.length < 300_000) {
+    return parseTxtContent(rawText, fallbackTitle);
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const workerCode = `
+        ${cleanChapterContent.toString()}
+        ${splitIntoLogicalChapters.toString()}
+        ${parseTxtContent.toString()}
+
+        self.onmessage = function(e) {
+          try {
+            var res = parseTxtContent(e.data.rawText, e.data.fallbackTitle);
+            self.postMessage({ success: true, result: res });
+          } catch(err) {
+            self.postMessage({ success: false, error: err.message });
+          }
+        };
+      `;
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      const workerUrl = URL.createObjectURL(blob);
+      const worker = new Worker(workerUrl);
+
+      worker.onmessage = (e: MessageEvent) => {
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+        if (e.data && e.data.success) {
+          resolve(e.data.result);
+        } else {
+          resolve(parseTxtContent(rawText, fallbackTitle));
+        }
+      };
+
+      worker.onerror = () => {
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+        resolve(parseTxtContent(rawText, fallbackTitle));
+      };
+
+      worker.postMessage({ rawText, fallbackTitle });
+    } catch {
+      resolve(parseTxtContent(rawText, fallbackTitle));
+    }
+  });
+}
+

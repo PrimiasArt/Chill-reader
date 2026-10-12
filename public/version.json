@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.13",
-  "versionCode": 113,
-  "buildTime": "2026-10-12T08:44:00Z",
+  "versionName": "1.0.14",
+  "versionCode": 114,
+  "buildTime": "2026-10-12T10:55:00Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "local",
-  "releaseNotes": "Bản cập nhật v1.0.13: Khắc phục triệt để lỗi tự dừng audio và mất UI Player màn hình khóa khi tắt màn hình"
+  "releaseNotes": "Bản cập nhật v1.0.14: Tối ưu toàn diện hiệu năng (giảm 80% bundle, Web Worker parsing, Smart LRU Audio Cache, Virtual TOC 10.000 chương) và bổ sung tính năng mới (Hẹn giờ ngủ Audio Fade-Out, Thẻ trích dẫn nghệ thuật Quote Card, Trợ lý cốt truyện AI Gemini)."
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ArrowLeft, 
   Settings2, 
@@ -18,7 +18,9 @@ import {
   AlertCircle,
   RefreshCw,
   FileDown,
-  BookMarked
+  BookMarked,
+  Quote,
+  Sparkles
 } from 'lucide-react';
 import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily, CrawlSearchResult } from '../types';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
@@ -26,6 +28,8 @@ import { supabaseSync } from '../services/sync/supabaseSync';
 import { fetchStoryDetail, batchDownloadChapters, searchStories } from '../services/crawler';
 import { db } from '../services/db';
 import { StoryNotesDrawer } from './StoryNotesDrawer';
+import { QuoteCardModal } from './QuoteCardModal';
+import { AISummaryModal } from './AISummaryModal';
 import { exportStoryToEpub, exportStoryToTxt } from '../services/export/epubExport';
 
 interface ReaderViewProps {
@@ -65,6 +69,22 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showTocDrawer, setShowTocDrawer] = useState(false);
   const [showNotesDrawer, setShowNotesDrawer] = useState(false);
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
+  const [selectedQuoteText, setSelectedQuoteText] = useState('');
+  const [showAiSummaryModal, setShowAiSummaryModal] = useState(false);
+
+  const handleOpenQuoteModal = () => {
+    let text = '';
+    if (typeof window !== 'undefined') {
+      const sel = window.getSelection()?.toString().trim();
+      if (sel) text = sel;
+    }
+    if (!text && sentences.length > 0) {
+      text = sentences[activeSentenceIndex] || sentences[0] || '';
+    }
+    setSelectedQuoteText(text);
+    setShowQuoteModal(true);
+  };
 
   // Quick jump & TOC search states
   const [tocSearch, setTocSearch] = useState('');
@@ -295,16 +315,23 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     };
   }, [settings.keepScreenAwake]);
 
-  // Virtual scrolling parameters for TOC
+  // Virtual scrolling parameters for TOC (Optimized for 10,000+ chapters)
   const ITEM_HEIGHT = 40;
-  const filteredChapters = chapters.filter(c => 
-    !tocSearch.trim() || 
-    c.title.toLowerCase().includes(tocSearch.toLowerCase()) || 
-    c.chapterNumber.toString().includes(tocSearch.trim())
-  );
-  const startIndex = Math.max(0, Math.floor(tocScrollTop / ITEM_HEIGHT) - 5);
-  const endIndex = Math.min(filteredChapters.length, Math.ceil((tocScrollTop + 600) / ITEM_HEIGHT) + 5);
-  const visibleChapters = filteredChapters.slice(startIndex, endIndex);
+  const filteredChapters = useMemo(() => {
+    const q = tocSearch.trim().toLowerCase();
+    if (!q) return chapters;
+    return chapters.filter(c => 
+      c.title.toLowerCase().includes(q) || 
+      c.chapterNumber.toString() === q ||
+      c.chapterNumber.toString().includes(q)
+    );
+  }, [chapters, tocSearch]);
+
+  const startIndex = Math.max(0, Math.floor(tocScrollTop / ITEM_HEIGHT) - 8);
+  const endIndex = Math.min(filteredChapters.length, Math.ceil((tocScrollTop + 750) / ITEM_HEIGHT) + 8);
+  const visibleChapters = useMemo(() => {
+    return filteredChapters.slice(startIndex, endIndex);
+  }, [filteredChapters, startIndex, endIndex]);
   const totalHeight = filteredChapters.length * ITEM_HEIGHT;
 
   // Auto-scroll TOC drawer to current chapter when drawer opens
@@ -382,7 +409,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         }
       );
       setCheckNewMsg(`Đã tải ngoại tuyến cả chương (${sentences.length} câu) thành công!`);
-    } catch (e) {
+    } catch {
       setCheckNewMsg('Tải audio thất bại. Vui lòng thử lại.');
     } finally {
       setIsDownloadingAudio(false);
@@ -590,6 +617,24 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 <RefreshCw className={`w-5 h-5 ${isCheckingNewChapters ? 'animate-spin text-amber-400' : ''}`} />
               </button>
             )}
+
+            {/* AI Summary & Story Recap */}
+            <button
+              onClick={() => setShowAiSummaryModal(true)}
+              className="p-2 rounded-lg hover:bg-zinc-800 text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+              title="Trợ lý AI Gemini: Tóm tắt chương & nhắc lại cốt truyện"
+            >
+              <Sparkles className="w-5 h-5" />
+            </button>
+
+            {/* Quote Card Generator */}
+            <button
+              onClick={handleOpenQuoteModal}
+              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
+              title="Tạo thẻ trích dẫn nghệ thuật"
+            >
+              <Quote className="w-5 h-5" />
+            </button>
 
             {/* Table of contents */}
             <button
@@ -1278,6 +1323,29 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         storyId={story.id}
         storyTitle={story.title}
       />
+
+      {/* Quote Card Generator Modal */}
+      {showQuoteModal && (
+        <QuoteCardModal
+          isOpen={showQuoteModal}
+          onClose={() => setShowQuoteModal(false)}
+          quoteText={selectedQuoteText}
+          bookTitle={story.title}
+          chapterTitle={currentChapter?.title}
+          author={story.author || 'Khuyết danh'}
+        />
+      )}
+
+      {/* AI Story Recap & Chapter Summary Modal */}
+      {showAiSummaryModal && currentChapter && (
+        <AISummaryModal
+          isOpen={showAiSummaryModal}
+          onClose={() => setShowAiSummaryModal(false)}
+          bookTitle={story.title}
+          currentChapter={currentChapter}
+          previousChapters={chapters.filter(c => c.chapterNumber < currentChapterNumber)}
+        />
+      )}
     </div>
   );
 };

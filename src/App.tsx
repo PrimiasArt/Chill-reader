@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
+import { Sparkles, Loader2 } from 'lucide-react';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { LibraryView } from './components/LibraryView';
-import { ImportModal } from './components/ImportModal';
-import { CrawlView } from './components/CrawlView';
-import { ReaderView } from './components/ReaderView';
 import { TTSPlayerBar } from './components/TTSPlayerBar';
-import { SettingsView } from './components/SettingsView';
-import { UpdateModal } from './components/UpdateModal';
+
+// Code-split heavy views to drastically reduce initial bundle size (< 150KB)
+const ReaderView = lazy(() => import('./components/ReaderView').then(m => ({ default: m.ReaderView })));
+const CrawlView = lazy(() => import('./components/CrawlView').then(m => ({ default: m.CrawlView })));
+const SettingsView = lazy(() => import('./components/SettingsView').then(m => ({ default: m.SettingsView })));
+const ImportModal = lazy(() => import('./components/ImportModal').then(m => ({ default: m.ImportModal })));
+const UpdateModal = lazy(() => import('./components/UpdateModal').then(m => ({ default: m.UpdateModal })));
 import { db, DEFAULT_READER_SETTINGS, DEFAULT_TTS_SETTINGS } from './services/db';
 import { ttsEngine, type TTSState } from './services/tts/ttsEngine';
 import { supabaseSync } from './services/sync/supabaseSync';
@@ -66,6 +68,8 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     loadLibrary();
+    // Run smart LRU audio cache purge silently in background
+    db.purgeOldAudioCache().catch(() => {});
 
     // Listen to background sync events to silently update UI
     const unsubSync = supabaseSync.addListener((isSyncing, lastSyncTime) => {
@@ -369,23 +373,30 @@ export const App: React.FC = () => {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-amber-500/30 selection:text-amber-200">
       {/* If reading a story, show ReaderView, otherwise show Main App with Header */}
       {activeStory ? (
-        <ReaderView
-          story={activeStory}
-          chapters={activeStoryChapters}
-          currentChapterNumber={currentChapterNumber}
-          onSelectChapter={handleSelectChapter}
-          onBackToLibrary={() => {
-            setActiveStory(null);
-            loadLibrary();
-          }}
-          onReloadChapters={handleReloadActiveStoryChapters}
-          settings={readerSettings}
-          onUpdateSettings={handleUpdateReaderSettings}
-          ttsState={ttsState}
-          onStartTTS={handleStartTTS}
-          onToggleTTS={() => ttsEngine.togglePlayPause()}
-          activeSentenceIndex={activeSentenceIndex}
-        />
+        <Suspense fallback={
+          <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center gap-3 text-zinc-400">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
+            <span className="text-sm font-medium">Đang mở trình đọc sách...</span>
+          </div>
+        }>
+          <ReaderView
+            story={activeStory}
+            chapters={activeStoryChapters}
+            currentChapterNumber={currentChapterNumber}
+            onSelectChapter={handleSelectChapter}
+            onBackToLibrary={() => {
+              setActiveStory(null);
+              loadLibrary();
+            }}
+            onReloadChapters={handleReloadActiveStoryChapters}
+            settings={readerSettings}
+            onUpdateSettings={handleUpdateReaderSettings}
+            ttsState={ttsState}
+            onStartTTS={handleStartTTS}
+            onToggleTTS={() => ttsEngine.togglePlayPause()}
+            activeSentenceIndex={activeSentenceIndex}
+          />
+        </Suspense>
       ) : (
         <>
           <Header
@@ -411,19 +422,33 @@ export const App: React.FC = () => {
             )}
 
             {currentTab === 'crawler' && (
-              <CrawlView
-                onStoryCrawled={handleImportComplete}
-              />
+              <Suspense fallback={
+                <div className="p-16 flex flex-col items-center justify-center gap-3 text-zinc-400">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                  <span className="text-sm">Đang tải kho truyện trực tuyến...</span>
+                </div>
+              }>
+                <CrawlView
+                  onStoryCrawled={handleImportComplete}
+                />
+              </Suspense>
             )}
 
             {currentTab === 'settings' && (
-              <SettingsView
-                readerSettings={readerSettings}
-                onUpdateReaderSettings={handleUpdateReaderSettings}
-                ttsSettings={ttsSettings}
-                onUpdateTtsSettings={handleUpdateTtsSettings}
-                onLibraryReload={loadLibrary}
-              />
+              <Suspense fallback={
+                <div className="p-16 flex flex-col items-center justify-center gap-3 text-zinc-400">
+                  <Loader2 className="w-8 h-8 animate-spin text-zinc-400" />
+                  <span className="text-sm">Đang nạp cài đặt...</span>
+                </div>
+              }>
+                <SettingsView
+                  readerSettings={readerSettings}
+                  onUpdateReaderSettings={handleUpdateReaderSettings}
+                  ttsSettings={ttsSettings}
+                  onUpdateTtsSettings={handleUpdateTtsSettings}
+                  onLibraryReload={loadLibrary}
+                />
+              </Suspense>
             )}
           </main>
 
@@ -458,11 +483,15 @@ export const App: React.FC = () => {
       />
 
       {/* File Import Modal (.txt, .epub, .pdf) */}
-      <ImportModal
-        isOpen={isImportModalOpen}
-        onClose={() => setIsImportModalOpen(false)}
-        onImportComplete={handleImportComplete}
-      />
+      {isImportModalOpen && (
+        <Suspense fallback={null}>
+          <ImportModal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+            onImportComplete={handleImportComplete}
+          />
+        </Suspense>
+      )}
 
       {/* Floating Update Notification Pill */}
       {updateNotification && (
@@ -484,10 +513,14 @@ export const App: React.FC = () => {
       )}
 
       {/* In-App Auto Update Modal */}
-      <UpdateModal
-        isOpen={isUpdateModalOpen}
-        onClose={() => setIsUpdateModalOpen(false)}
-      />
+      {isUpdateModalOpen && (
+        <Suspense fallback={null}>
+          <UpdateModal
+            isOpen={isUpdateModalOpen}
+            onClose={() => setIsUpdateModalOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

@@ -8,7 +8,7 @@ import {
   Sparkles,
   Info
 } from 'lucide-react';
-import { parseTxtContent, type ParsedBook } from '../services/parser/txtParser';
+import { parseTxtContentAsync, type ParsedBook } from '../services/parser/txtParser';
 import { parseEpubFile } from '../services/parser/epubParser';
 import { parsePdfFile } from '../services/parser/pdfParser';
 import type { Story, Chapter, StorySource } from '../types';
@@ -52,7 +52,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     try {
       if (ext === 'txt') {
         const text = await file.text();
-        const parsed = parseTxtContent(text, file.name);
+        const parsed = await parseTxtContentAsync(text, file.name);
         setParsedData({
           book: parsed,
           source: 'local_txt',

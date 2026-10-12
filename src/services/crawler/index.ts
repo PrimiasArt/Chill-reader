@@ -72,6 +72,36 @@ export const POPULAR_RECOMMENDED_STORIES: CrawlSearchResult[] = [
     latestChapter: '1432 chương · Hoàn thành',
     sourceUrl: 'https://wetruyen.com/quy-bi-chi-chu.3941/',
     sourceName: 'WeTruyen'
+  },
+  {
+    id: 'dai-phung-da-canh-nhan',
+    title: 'Đại Phụng Đả Canh Nhân',
+    author: 'Mại Báo Tiểu Lang Quân',
+    coverUrl: 'https://cdn.wetruyen.com/medias/covers/4/4648-dai-phung-da-canh-nhan_cover_large.jpg',
+    description: 'Cảnh sát hình sự Hứa Thất An xuyên không về thế giới tiên hiệp kỳ bí, phá án đoạt mệnh...',
+    latestChapter: '931 chương · Hoàn thành',
+    sourceUrl: 'https://wetruyen.com/dai-phung-da-canh-nhan.4648/',
+    sourceName: 'WeTruyen'
+  },
+  {
+    id: 'tien-nghich',
+    title: 'Tiên Nghịch',
+    author: 'Nhĩ Căn',
+    coverUrl: 'https://cdn.wetruyen.com/medias/covers/0/23-tien-nghich_cover_large.jpg',
+    description: 'Thuận vi phàm, nghịch vi tiên, chỉ tại nhất niệm chi gian...',
+    latestChapter: '1976 chương · Hoàn thành',
+    sourceUrl: 'https://wetruyen.com/tien-nghich.23/',
+    sourceName: 'WeTruyen'
+  },
+  {
+    id: 'de-ba',
+    title: 'Đế Bá',
+    author: 'Yếm Bút Tiêu Sinh',
+    coverUrl: 'https://cdn.wetruyen.com/medias/covers/0/134-de-ba_cover_large.jpg',
+    description: 'Ngàn vạn năm trước, Lý Thất Dạ gieo xuống một cây trúc, dưỡng thành một con quạ đen...',
+    latestChapter: '5000+ chương',
+    sourceUrl: 'https://wetruyen.com/de-ba.134/',
+    sourceName: 'WeTruyen'
   }
 ];
 

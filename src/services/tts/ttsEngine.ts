@@ -547,6 +547,9 @@ class TTSEngine {
 
   public play() {
     if (this.sentences.length === 0) return;
+    if (this.sleepTimerSeconds === null || this.sleepTimerSeconds > 30) {
+      this.setAudioVolume(1.0);
+    }
 
     // One-time prompt on Android to request Battery Optimization Exemption so screen-off audio runs indefinitely
     try {
@@ -1210,8 +1213,14 @@ class TTSEngine {
     return finalResult.length > 0 ? finalResult : [text.trim()].filter(Boolean);
   }
 
+  private setAudioVolume(volume: number) {
+    const clamped = Math.max(0, Math.min(1, volume));
+    if (this.audioPlayers[0]) this.audioPlayers[0].volume = clamped;
+    if (this.audioPlayers[1]) this.audioPlayers[1].volume = clamped;
+  }
+
   /**
-   * Sleep Timer Management
+   * Sleep Timer Management with Smooth Audio Fade-Out
    */
   public setSleepTimer(minutes: number | null) {
     if (this.sleepTimerId) {
@@ -1226,6 +1235,7 @@ class TTSEngine {
     if (!minutes || minutes <= 0) {
       this.sleepTimerSeconds = null;
       this.notifyCountdown(null);
+      this.setAudioVolume(1.0);
       if (this.shakeCleanup) {
         this.shakeCleanup();
         this.shakeCleanup = null;
@@ -1235,6 +1245,7 @@ class TTSEngine {
 
     this.sleepTimerSeconds = minutes * 60;
     this.notifyCountdown(this.sleepTimerSeconds);
+    this.setAudioVolume(1.0);
 
     // Auto-extend sleep timer by 15 mins when user shakes the phone
     if (!this.shakeCleanup) {
@@ -1249,11 +1260,20 @@ class TTSEngine {
       if (this.sleepTimerSeconds !== null && this.sleepTimerSeconds > 0) {
         this.sleepTimerSeconds--;
         this.notifyCountdown(this.sleepTimerSeconds);
+
+        // Smooth Audio Fade-Out: gradually scale volume from 1.0 down to 0 in the last 30 seconds
+        if (this.sleepTimerSeconds <= 30) {
+          const fadeRatio = Math.max(0.05, this.sleepTimerSeconds / 30);
+          this.setAudioVolume(fadeRatio);
+        } else {
+          this.setAudioVolume(1.0);
+        }
       }
     }, 1000);
 
     this.sleepTimerId = window.setTimeout(() => {
       this.pause();
+      this.setAudioVolume(1.0); // Reset volume to 100% for next play session
       this.setSleepTimer(null);
     }, minutes * 60 * 1000);
   }
@@ -1263,12 +1283,14 @@ class TTSEngine {
     const newSeconds = this.sleepTimerSeconds + extraMinutes * 60;
     this.sleepTimerSeconds = newSeconds;
     this.notifyCountdown(newSeconds);
+    this.setAudioVolume(1.0); // Instantly restore full volume when timer is extended
 
     if (this.sleepTimerId) {
       window.clearTimeout(this.sleepTimerId);
     }
     this.sleepTimerId = window.setTimeout(() => {
       this.pause();
+      this.setAudioVolume(1.0);
       this.setSleepTimer(null);
     }, newSeconds * 1000);
   }

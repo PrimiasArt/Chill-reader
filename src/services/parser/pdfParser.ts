@@ -1,14 +1,12 @@
-import * as pdfjsLib from 'pdfjs-dist';
 import type { ParsedBook, ParsedChapter } from './txtParser';
-
-// Use CDN worker for maximum compatibility across bundlers
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 export interface PdfParseResult extends ParsedBook {
   isScannedPdf?: boolean;
 }
 
 export async function parsePdfFile(file: File | ArrayBuffer, fileName: string): Promise<PdfParseResult> {
+  const pdfjsLib = await import('pdfjs-dist');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
   const arrayBuffer = file instanceof File ? await file.arrayBuffer() : file;
   const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
   const pdf = await loadingTask.promise;
