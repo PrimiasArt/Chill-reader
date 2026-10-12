@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.12",
-  "versionCode": 112,
-  "buildTime": "2026-10-11T11:40:00Z",
+  "versionName": "1.0.13",
+  "versionCode": 113,
+  "buildTime": "2026-10-12T08:44:00Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "local",
-  "releaseNotes": "Bản phát hành chính thức nâng cấp tính năng đọc offline Native TTS, chống tràn player và cải thiện hiệu năng"
+  "releaseNotes": "Bản cập nhật v1.0.13: Khắc phục triệt để lỗi tự dừng audio và mất UI Player màn hình khóa khi tắt màn hình"
 }

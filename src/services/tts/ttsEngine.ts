@@ -548,6 +548,20 @@ class TTSEngine {
   public play() {
     if (this.sentences.length === 0) return;
 
+    // One-time prompt on Android to request Battery Optimization Exemption so screen-off audio runs indefinitely
+    try {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.isBatteryOptimizationIgnored === 'function') {
+        const isIgnored = androidMedia.isBatteryOptimizationIgnored();
+        if (!isIgnored && !(window as any).__hasPromptedBatteryExemption) {
+          (window as any).__hasPromptedBatteryExemption = true;
+          setTimeout(() => {
+            androidMedia.requestBatteryOptimizationExemption?.();
+          }, 1200);
+        }
+      }
+    } catch {}
+
     if (this.isNativeVoice()) {
       this.stopBackgroundAudioContext();
       this.silentAudio?.pause();
@@ -914,9 +928,9 @@ class TTSEngine {
         if (currentToken !== this.playbackToken || this.state !== 'playing') return;
         console.warn('Audio player error on sentence:', sentenceIdx, e);
 
-        // If offline and native Android TTS is ready, automatically fallback to Native TTS
-        if (!navigator.onLine && (window as any).AndroidMedia?.isNativeTtsReady?.()) {
-          console.log('Device is offline: seamlessly reading via Native Android TTS');
+        // If offline or network stalled, and native Android TTS is ready, automatically fallback to Native TTS
+        if ((!navigator.onLine || this.consecutiveErrors >= 2) && (window as any).AndroidMedia?.isNativeTtsReady?.()) {
+          console.log('Network stall or device offline: seamlessly reading via Native Android TTS');
           this.playNativeAndroidTTS(sentence, currentToken);
           return;
         }

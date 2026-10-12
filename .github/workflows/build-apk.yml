@@ -97,13 +97,12 @@ jobs:
             - **Phiên bản:** `1.0.${{ github.run_number }}` (Mới nhất)
             - **Chữ ký cố định (Persistent Keystore):** Cài đè trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu sách offline và cài đặt đồng bộ Supabase Cloud.
             - **Tính năng & Sửa lỗi:**
-              - 🚀 **Khắc phục triệt để lỗi audio tự dừng giữa chừng khi nghe truyện:**
-                - Khử bỏ nhận diện nhầm luồng âm thanh nền của app/game khác (chỉ ưu tiên cuộc gọi SIM/Zalo/Instagram/Messenger và chuông báo thức).
-                - Tự động tiếp tục đọc khi cuộc gọi hoặc chuông báo thức kết thúc.
-                - Bổ sung Watchdog tự động nhảy câu nếu Native TTS engine bị treo/rớt callback trên Android.
-                - Tự động bỏ qua các câu ký tự đặc biệt/dấu câu rỗng không làm kẹt hàng đợi.
-                - Ngăn WebView xóa cache và Garbage Collection khi đang phát audio ở chế độ nền.
-                - Cập nhật lockscreen notification mượt mà không re-startForeground liên tục.
+              - 🚀 **Khắc phục triệt để lỗi tự dừng audio & mất UI Player màn hình khóa khi tắt màn hình (Android 12/13/14+):**
+                - **Native Silent AudioTrack:** Duy trì luồng âm thanh native ngầm ở tầng hệ thống Android OS giúp hệ điều hành nhận diện phát nhạc liên tục, không bao giờ thu hồi hoặc làm mất UI Player trên màn hình khóa.
+                - **In-Memory Playback Dispatch:** Cập nhật tiến độ đọc trực tiếp trong bộ nhớ thay vì gửi startForegroundService lặp lại từ background, tránh lỗi ForegroundServiceStartNotAllowedException của Android 12+.
+                - **Giữ WebView chạy ngầm:** Override lifecycle onPause/onStop trong MainActivity để duy trì timers và JS event loop khi tắt màn hình, đảm bảo chuyển câu không bị ngắt.
+                - **Tự động xin quyền chạy nền:** Bổ sung nhắc nhở cấp quyền bỏ qua tối ưu pin (Ignore Battery Optimizations) tự động khi phát audio.
+                - **Dự phòng rớt mạng:** Tự động chuyển đổi mượt mà sang giọng Offline máy nếu mạng bị gián đoạn lúc tắt màn hình.
 
             👉 Tải file **`ChillReader-v1.0.apk`** hoặc **`ChillReader-v1.0.${{ github.run_number }}.apk`** bên dưới để cài đặt trực tiếp vào điện thoại Android.
           files: |

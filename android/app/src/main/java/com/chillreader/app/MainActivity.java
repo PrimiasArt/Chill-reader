@@ -67,6 +67,38 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         sInstance = this;
+        try {
+            WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+            if (webView != null) {
+                webView.resumeTimers();
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        keepWebViewAliveIfPlaying();
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        keepWebViewAliveIfPlaying();
+    }
+
+    private void keepWebViewAliveIfPlaying() {
+        try {
+            if (MediaPlaybackService.isPlaying()) {
+                WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+                if (webView != null) {
+                    webView.resumeTimers();
+                    webView.onResume();
+                }
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
     }
 
     private void setupWebViewBridge() {

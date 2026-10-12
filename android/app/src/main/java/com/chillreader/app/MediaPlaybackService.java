@@ -15,8 +15,10 @@ import android.graphics.BitmapFactory;
 import android.content.SharedPreferences;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
+import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioPlaybackConfiguration;
+import android.media.AudioTrack;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -100,6 +102,7 @@ public class MediaPlaybackService extends Service {
 
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
+    private AudioTrack silentAudioTrack = null;
 
     private AudioManager audioManager;
     private AudioManager.OnAudioFocusChangeListener audioFocusChangeListener;
@@ -152,6 +155,22 @@ public class MediaPlaybackService extends Service {
                 return;
             }
 
+            // High performance: if service is already running, update in-memory directly
+            // Avoids ForegroundServiceStartNotAllowedException on Android 12+ from background
+            MediaPlaybackService service = sInstance;
+            if (service != null) {
+                service.updatePlaybackDirect(
+                    chapterTitle,
+                    bookTitle,
+                    author,
+                    isPlaying,
+                    coverUrl,
+                    currentSentence,
+                    totalSentences
+                );
+                return;
+            }
+
             Intent intent = new Intent(context, MediaPlaybackService.class);
             intent.setAction(ACTION_UPDATE_PLAYBACK);
             intent.putExtra(EXTRA_CHAPTER_TITLE, chapterTitle);
@@ -169,13 +188,101 @@ public class MediaPlaybackService extends Service {
                     context.startService(intent);
                 }
             } else {
-                if (sInstance != null) {
-                    context.startService(intent);
-                }
+                context.startService(intent);
             }
         } catch (Throwable t) {
             t.printStackTrace();
         }
+    }
+
+    public void updatePlaybackDirect(
+        String chapterTitle,
+        String bookTitle,
+        String author,
+        boolean isPlaying,
+        String coverUrl,
+        int currentSentence,
+        int totalSentences
+    ) {
+        mainHandler.post(() -> {
+            try {
+                if (isNativeTtsMode) {
+                    return;
+                }
+                isNativeTtsMode = false;
+                currentChapterTitle = chapterTitle;
+                currentBookTitle = bookTitle;
+                currentAuthor = author;
+                currentSentenceIndex = currentSentence;
+                currentTotalSentences = totalSentences;
+                sIsPlaying = isPlaying;
+
+                if (isPlaying) {
+                    requestAudioFocus();
+                    startSilentNativeAudio();
+                    acquireLocks();
+                } else {
+                    stopSilentNativeAudio();
+                    releaseLocks();
+                }
+
+                renderNotificationAndForeground(isPlaying, coverUrl);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        });
+    }
+
+    public synchronized void startSilentNativeAudio() {
+        try {
+            if (silentAudioTrack != null) return;
+            int sampleRate = 8000;
+            int minBufferSize = AudioTrack.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            );
+            int bufferSize = Math.max(minBufferSize, sampleRate * 2);
+            byte[] silentData = new byte[bufferSize];
+
+            AudioAttributes attributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build();
+
+            AudioFormat format = new AudioFormat.Builder()
+                .setSampleRate(sampleRate)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .build();
+
+            silentAudioTrack = new AudioTrack(
+                attributes,
+                format,
+                bufferSize,
+                AudioTrack.MODE_STATIC,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            );
+
+            silentAudioTrack.write(silentData, 0, silentData.length);
+            silentAudioTrack.setLoopPoints(0, silentData.length / 2, -1);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                silentAudioTrack.setVolume(0.001f);
+            }
+            silentAudioTrack.play();
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public synchronized void stopSilentNativeAudio() {
+        try {
+            if (silentAudioTrack != null) {
+                silentAudioTrack.stop();
+                silentAudioTrack.release();
+                silentAudioTrack = null;
+            }
+        } catch (Throwable ignored) {}
     }
 
     public static void startNativeQueue(
@@ -192,6 +299,15 @@ public class MediaPlaybackService extends Service {
     ) {
         try {
             if (context == null) return;
+            MediaPlaybackService service = sInstance;
+            if (service != null) {
+                service.currentChapterTitle = chapterTitle;
+                service.currentBookTitle = bookTitle;
+                service.currentAuthor = author;
+                service.loadAndStartNativeQueue(sentencesJson, startIndex, rate, pitch, coverUrl, voiceURI);
+                return;
+            }
+
             Intent intent = new Intent(context, MediaPlaybackService.class);
             intent.setAction(ACTION_START_NATIVE_QUEUE);
             intent.putExtra(EXTRA_CHAPTER_TITLE, chapterTitle);
@@ -289,7 +405,7 @@ public class MediaPlaybackService extends Service {
                 "Chill Reader",
                 "Đang phát âm thanh",
                 "Chill Reader",
-                false,
+                true,
                 null
             );
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -359,6 +475,11 @@ public class MediaPlaybackService extends Service {
             sIsPlaying = isPlaying;
             if (isPlaying) {
                 requestAudioFocus();
+                startSilentNativeAudio();
+                acquireLocks();
+            } else {
+                stopSilentNativeAudio();
+                releaseLocks();
             }
             renderNotificationAndForeground(isPlaying, coverUrl);
             return START_STICKY;
@@ -861,6 +982,7 @@ public class MediaPlaybackService extends Service {
         sIsPlaying = false;
         pausedBySystem = bySystem;
         cancelTtsWatchdog();
+        stopSilentNativeAudio();
         if (nativeTts != null) {
             try {
                 nativeTts.stop();
@@ -874,6 +996,7 @@ public class MediaPlaybackService extends Service {
     public void resumeNativeTts() {
         if (!isNativeTtsMode) return;
         requestAudioFocus();
+        startSilentNativeAudio();
         acquireLocks();
         sIsPlaying = true;
         playCurrentNativeSentence();
@@ -883,6 +1006,7 @@ public class MediaPlaybackService extends Service {
     public void stopNativeTts() {
         isNativeTtsMode = false;
         sIsPlaying = false;
+        stopSilentNativeAudio();
         cancelTtsWatchdog();
         if (nativeTts != null) {
             try {
@@ -1056,8 +1180,10 @@ public class MediaPlaybackService extends Service {
 
             if (isPlaying) {
                 acquireLocks();
+                startSilentNativeAudio();
             } else {
                 releaseLocks();
+                stopSilentNativeAudio();
             }
 
             String title = (currentChapterTitle != null && !currentChapterTitle.trim().isEmpty())
@@ -1114,7 +1240,14 @@ public class MediaPlaybackService extends Service {
 
             notification = buildNotification(title, subtitle, book, isPlaying, artBitmap);
 
-            if (!isForegroundRunning) {
+            if (isPlaying) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+                } else {
+                    startForeground(NOTIFICATION_ID, notification);
+                }
+                isForegroundRunning = true;
+            } else if (!isForegroundRunning) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
                 } else {
@@ -1122,6 +1255,7 @@ public class MediaPlaybackService extends Service {
                 }
                 isForegroundRunning = true;
             }
+
             if (notificationManager != null) {
                 notificationManager.notify(NOTIFICATION_ID, notification);
             }
@@ -1184,7 +1318,7 @@ public class MediaPlaybackService extends Service {
             .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setStyle(mediaStyle)
             .addAction(android.R.drawable.ic_media_previous, "Lùi", pendingPrev)
             .addAction(
@@ -1277,6 +1411,7 @@ public class MediaPlaybackService extends Service {
         sIsPlaying = false;
         isNativeTtsMode = false;
         isForegroundRunning = false;
+        stopSilentNativeAudio();
         cancelTtsWatchdog();
         releaseLocks();
         abandonAudioFocus();
@@ -1327,6 +1462,7 @@ public class MediaPlaybackService extends Service {
         sIsPlaying = false;
         isNativeTtsMode = false;
         isForegroundRunning = false;
+        stopSilentNativeAudio();
         cancelTtsWatchdog();
         releaseLocks();
         abandonAudioFocus();
