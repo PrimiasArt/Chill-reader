@@ -119,6 +119,7 @@ public class MediaPlaybackService extends Service {
     private volatile float nativePitch = 1.0f;
     private volatile boolean isNativeTtsMode = false;
     private volatile String selectedVoiceName = "";
+    private volatile String currentSpeakingUtteranceId = "";
 
     private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
     private volatile String lastCoverUrl = null;
@@ -789,6 +790,9 @@ public class MediaPlaybackService extends Service {
                     nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                         @Override
                         public void onStart(String utteranceId) {
+                            if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                return;
+                            }
                             mainHandler.post(() -> {
                                 MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
                             });
@@ -799,6 +803,9 @@ public class MediaPlaybackService extends Service {
                             mainHandler.post(() -> {
                                 cancelTtsWatchdog();
                                 if (!isNativeTtsMode || !sIsPlaying) return;
+                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                    return;
+                                }
                                 nativeSentenceIndex++;
                                 playCurrentNativeSentence();
                             });
@@ -809,6 +816,9 @@ public class MediaPlaybackService extends Service {
                             mainHandler.post(() -> {
                                 cancelTtsWatchdog();
                                 if (!isNativeTtsMode || !sIsPlaying) return;
+                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                    return;
+                                }
                                 nativeSentenceIndex++;
                                 playCurrentNativeSentence();
                             });
@@ -817,15 +827,8 @@ public class MediaPlaybackService extends Service {
                         @Override
                         public void onStop(String utteranceId, boolean interrupted) {
                             cancelTtsWatchdog();
-                            if (isNativeTtsMode && sIsPlaying && !pausedBySystem) {
-                                // Screen timeout, lockscreen transition, or temporary system audio focus glitch interrupted the utterance.
-                                // Automatically recover and resume playback!
-                                mainHandler.postDelayed(() -> {
-                                    if (isNativeTtsMode && sIsPlaying && !pausedBySystem) {
-                                        playCurrentNativeSentence();
-                                    }
-                                }, 300);
-                            }
+                            // Note: onStop is fired whenever an utterance is stopped or flushed by QUEUE_FLUSH.
+                            // Never auto-restart here to prevent stutter/infinite loops!
                         }
                     });
 
@@ -907,17 +910,20 @@ public class MediaPlaybackService extends Service {
             nativeTts.setPitch(nativePitch);
             String sentence = nativeSentences.get(nativeSentenceIndex);
 
+            final String utteranceId = "utt_" + System.currentTimeMillis() + "_" + nativeSentenceIndex;
+            currentSpeakingUtteranceId = utteranceId;
+
             long estimatedMs = (long) ((sentence.length() / (10.0f * Math.max(0.5f, nativeRate))) * 1000L);
             long watchdogTimeoutMs = Math.max(8000L, estimatedMs + 10000L);
 
             int result = TextToSpeech.ERROR;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 Bundle params = new Bundle();
-                params.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
-                result = nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, params, "utt_" + nativeSentenceIndex);
+                params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId);
+                result = nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, params, utteranceId);
             } else {
                 java.util.HashMap<String, String> params = new java.util.HashMap<>();
-                params.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "utt_" + nativeSentenceIndex);
+                params.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId);
                 params.put(TextToSpeech.Engine.KEY_PARAM_STREAM, String.valueOf(AudioManager.STREAM_MUSIC));
                 result = nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, params);
             }
@@ -1055,6 +1061,20 @@ public class MediaPlaybackService extends Service {
                     switch (focusChange) {
                         case AudioManager.AUDIOFOCUS_LOSS:
                             boolean callActivePermanent = isHighPriorityAudioActive();
+                            boolean isInteractive = true;
+                            try {
+                                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                                if (pm != null) {
+                                    isInteractive = pm.isInteractive();
+                                }
+                            } catch (Throwable ignored) {}
+
+                            // If screen is OFF or locked, audio focus loss is caused by keyguard/lockscreen transition, NOT a call.
+                            // Never pause when screen is off unless there is an actual incoming/active phone call!
+                            if (!isInteractive && !callActivePermanent) {
+                                break;
+                            }
+
                             if (callActivePermanent || !playAlongOtherApps) {
                                 if (sIsPlaying) {
                                     if (isNativeTtsMode) {

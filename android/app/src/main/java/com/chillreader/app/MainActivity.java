@@ -93,7 +93,6 @@ public class MainActivity extends BridgeActivity {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
                 if (webView != null) {
                     webView.resumeTimers();
-                    webView.onResume();
                 }
             }
         } catch (Throwable t) {
@@ -633,11 +632,13 @@ public class MainActivity extends BridgeActivity {
         }
         if (nativeTts != null) {
             try {
-                nativeTts.stop();
-                nativeTts.shutdown();
+                if (!MediaPlaybackService.isPlaying()) {
+                    nativeTts.stop();
+                    nativeTts.shutdown();
+                    nativeTts = null;
+                    isNativeTtsReady = false;
+                }
             } catch (Exception ignored) {}
-            nativeTts = null;
-            isNativeTtsReady = false;
         }
     }
 }
