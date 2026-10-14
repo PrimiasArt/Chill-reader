@@ -1,5 +1,6 @@
 package com.chillreader.app;
 
+import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -146,6 +147,10 @@ public class MediaPlaybackService extends Service {
         return sIsPlaying;
     }
 
+    public static boolean isPlaybackActive() {
+        return sIsPlaying || (sInstance != null && sInstance.isForegroundRunning);
+    }
+
     public static void startOrUpdate(
         Context context,
         String chapterTitle,
@@ -214,7 +219,12 @@ public class MediaPlaybackService extends Service {
         mainHandler.post(() -> {
             try {
                 if (isNativeTtsMode) {
-                    return;
+                    if (isPlaying) {
+                        stopNativeTts();
+                        isNativeTtsMode = false;
+                    } else {
+                        return;
+                    }
                 }
                 isNativeTtsMode = false;
                 currentChapterTitle = chapterTitle;
@@ -241,14 +251,76 @@ public class MediaPlaybackService extends Service {
     }
 
     public synchronized void startSilentNativeAudio() {
-        // Native TextToSpeech maintains an official AudioTrack and foreground media session.
-        // No-op to prevent OS background battery management termination.
+        try {
+            if (silentAudioTrack != null) {
+                if (silentAudioTrack.getState() == AudioTrack.STATE_INITIALIZED) {
+                    if (silentAudioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) {
+                        return;
+                    }
+                    try {
+                        silentAudioTrack.play();
+                        return;
+                    } catch (Throwable ignored) {
+                        stopSilentNativeAudio();
+                    }
+                } else {
+                    stopSilentNativeAudio();
+                }
+            }
+
+            int sampleRate = 44100;
+            int channelConfig = AudioFormat.CHANNEL_OUT_MONO;
+            int audioFormat = AudioFormat.ENCODING_PCM_16BIT;
+            int minBufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat);
+            int bufferSize = (minBufferSize > 0) ? Math.max(minBufferSize, sampleRate * 2) : sampleRate * 2;
+            byte[] silentData = new byte[bufferSize];
+
+            AudioAttributes attributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build();
+
+            AudioFormat format = new AudioFormat.Builder()
+                .setSampleRate(sampleRate)
+                .setEncoding(audioFormat)
+                .setChannelMask(channelConfig)
+                .build();
+
+            silentAudioTrack = new AudioTrack(
+                attributes,
+                format,
+                bufferSize,
+                AudioTrack.MODE_STATIC,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            );
+
+            if (silentAudioTrack.getState() == AudioTrack.STATE_INITIALIZED) {
+                silentAudioTrack.write(silentData, 0, silentData.length);
+                int frameCount = bufferSize / 2;
+                silentAudioTrack.setLoopPoints(0, frameCount, -1);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    silentAudioTrack.setVolume(0.0001f);
+                }
+                silentAudioTrack.play();
+            } else {
+                silentAudioTrack.release();
+                silentAudioTrack = null;
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
     }
 
     public synchronized void stopSilentNativeAudio() {
         try {
             if (silentAudioTrack != null) {
-                silentAudioTrack.stop();
+                if (silentAudioTrack.getState() == AudioTrack.STATE_INITIALIZED) {
+                    try {
+                        silentAudioTrack.pause();
+                        silentAudioTrack.flush();
+                        silentAudioTrack.stop();
+                    } catch (Throwable ignored) {}
+                }
                 silentAudioTrack.release();
                 silentAudioTrack = null;
             }
@@ -1086,16 +1158,23 @@ public class MediaPlaybackService extends Service {
                         case AudioManager.AUDIOFOCUS_LOSS:
                             boolean callActivePermanent = isHighPriorityAudioActive();
                             boolean isInteractive = true;
+                            boolean isLocked = false;
                             try {
                                 PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                                 if (pm != null) {
                                     isInteractive = pm.isInteractive();
                                 }
                             } catch (Throwable ignored) {}
+                            try {
+                                KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+                                if (km != null) {
+                                    isLocked = km.isKeyguardLocked();
+                                }
+                            } catch (Throwable ignored) {}
 
                             // If screen is OFF or locked, audio focus loss is caused by keyguard/lockscreen transition, NOT a call.
-                            // Never pause when screen is off unless there is an actual incoming/active phone call!
-                            if (!isInteractive && !callActivePermanent) {
+                            // Never pause when screen is off or keyguard is locked unless there is an actual incoming/active phone call!
+                            if ((!isInteractive || isLocked) && !callActivePermanent) {
                                 break;
                             }
 

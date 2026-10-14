@@ -6,6 +6,8 @@ import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.speech.tts.TextToSpeech;
@@ -29,6 +31,7 @@ import java.util.Locale;
 
 public class MainActivity extends BridgeActivity {
     private static volatile MainActivity sInstance = null;
+    private static volatile boolean sIsWebPlaying = false;
 
     private TextToSpeech nativeTts;
     private boolean isNativeTtsReady = false;
@@ -91,6 +94,7 @@ public class MainActivity extends BridgeActivity {
         try {
             WebView webView = getBridge() != null ? getBridge().getWebView() : null;
             if (webView != null) {
+                webView.onResume();
                 webView.resumeTimers();
             }
         } catch (Throwable ignored) {}
@@ -100,19 +104,32 @@ public class MainActivity extends BridgeActivity {
     public void onPause() {
         super.onPause();
         keepWebViewAliveIfPlaying();
+        new Handler(Looper.getMainLooper()).postDelayed(this::keepWebViewAliveIfPlaying, 100);
+        new Handler(Looper.getMainLooper()).postDelayed(this::keepWebViewAliveIfPlaying, 500);
     }
 
     @Override
     public void onStop() {
         super.onStop();
         keepWebViewAliveIfPlaying();
+        new Handler(Looper.getMainLooper()).postDelayed(this::keepWebViewAliveIfPlaying, 100);
+        new Handler(Looper.getMainLooper()).postDelayed(this::keepWebViewAliveIfPlaying, 500);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus) {
+            keepWebViewAliveIfPlaying();
+        }
     }
 
     private void keepWebViewAliveIfPlaying() {
         try {
-            if (MediaPlaybackService.isPlaying()) {
+            if (MediaPlaybackService.isPlaying() || MediaPlaybackService.isPlaybackActive() || sIsWebPlaying) {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
                 if (webView != null) {
+                    webView.onResume();
                     webView.resumeTimers();
                 }
             }
@@ -258,6 +275,7 @@ public class MainActivity extends BridgeActivity {
             int totalSentences
         ) {
             try {
+                sIsWebPlaying = isPlaying;
                 MediaPlaybackService.startOrUpdate(
                     MainActivity.this,
                     chapterTitle,
@@ -276,6 +294,7 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void clearMedia() {
             try {
+                sIsWebPlaying = false;
                 MediaPlaybackService.stop(MainActivity.this);
             } catch (Throwable t) {
                 t.printStackTrace();
