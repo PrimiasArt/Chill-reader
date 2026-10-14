@@ -4,6 +4,8 @@ import {
   Pause, 
   RotateCcw, 
   RotateCw, 
+  SkipBack,
+  SkipForward,
   Timer, 
   Volume2, 
   Maximize2, 
@@ -12,7 +14,9 @@ import {
   Download,
   Loader2,
   Smartphone,
-  CloudRain
+  CloudRain,
+  Gauge,
+  Mic
 } from 'lucide-react';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
 import { ambientAudioService, AMBIENT_SOUND_OPTIONS, type AmbientSoundType } from '../services/tts/ambientAudio';
@@ -36,6 +40,10 @@ interface TTSPlayerBarProps {
   isInsideReader?: boolean;
   storyId?: string;
   chapterNumber?: number;
+  onPreviousChapter?: () => void;
+  onNextChapter?: () => void;
+  hasPreviousChapter?: boolean;
+  hasNextChapter?: boolean;
 }
 
 export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
@@ -55,12 +63,17 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
   onSetOpenFullModal,
   isInsideReader,
   storyId,
-  chapterNumber
+  chapterNumber,
+  onPreviousChapter,
+  onNextChapter,
+  hasPreviousChapter,
+  hasNextChapter
 }) => {
   const [ambientType, setAmbientType] = useState<AmbientSoundType>(ambientAudioService.getType());
   const [ambientVolume, setAmbientVolume] = useState<number>(ambientAudioService.getVolume());
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [activeSettingTab, setActiveSettingTab] = useState<'speed' | 'voice' | 'ambient' | 'timer' | null>(null);
 
   if (ttsState === 'idle') return null;
 
@@ -242,172 +255,314 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
             </div>
 
             {/* Main Audio Buttons */}
-            <div className="flex items-center justify-center gap-6">
+            <div className="flex items-center justify-center gap-3 sm:gap-5 w-full">
+              {/* Previous Chapter */}
+              <button
+                onClick={async () => {
+                  if (onPreviousChapter) {
+                    onPreviousChapter();
+                  } else {
+                    await ttsEngine.advanceToPreviousChapter();
+                  }
+                }}
+                disabled={hasPreviousChapter === false}
+                className="p-2.5 sm:p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-300 hover:text-amber-400 transition-all active:scale-95 cursor-pointer"
+                title="Chương trước"
+              >
+                <SkipBack className="w-5 h-5" />
+              </button>
+
+              {/* Rewind 1 sentence */}
               <button
                 onClick={() => ttsEngine.previousSentence()}
-                className="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors cursor-pointer"
+                className="p-2.5 sm:p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors active:scale-95 cursor-pointer"
                 title="Lùi 1 câu"
               >
                 <RotateCcw className="w-5 h-5" />
               </button>
 
+              {/* Play / Pause */}
               <button
                 onClick={() => ttsEngine.togglePlayPause()}
-                className="p-5 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
+                className="p-4 sm:p-5 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold shadow-lg shadow-amber-500/25 active:scale-95 transition-all cursor-pointer"
                 title={ttsState === 'playing' ? 'Tạm dừng' : 'Đọc tiếp'}
               >
                 {ttsState === 'playing' ? (
-                  <Pause className="w-7 h-7 fill-current" />
+                  <Pause className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
                 ) : (
-                  <Play className="w-7 h-7 fill-current translate-x-0.5" />
+                  <Play className="w-6 h-6 sm:w-7 sm:h-7 fill-current translate-x-0.5" />
                 )}
               </button>
 
+              {/* Forward 1 sentence */}
               <button
                 onClick={() => ttsEngine.nextSentence()}
-                className="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors cursor-pointer"
+                className="p-2.5 sm:p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors active:scale-95 cursor-pointer"
                 title="Tiến 1 câu"
               >
                 <RotateCw className="w-5 h-5" />
               </button>
-            </div>
 
-            {/* Playback Speed Controls */}
-            <div className="w-full space-y-2">
-              <div className="flex justify-between items-center text-xs text-zinc-400">
-                <span>Tốc độ đọc (0.5x - 4.0x)</span>
-                <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                  {settings.rate}x
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0.5"
-                max="4.0"
-                step="0.1"
-                value={settings.rate || 1.0}
-                onChange={(e) => {
-                  const rate = parseFloat(e.target.value);
-                  onUpdateSettings({ rate });
-                  ttsEngine.updateSettings({ rate });
+              {/* Next Chapter */}
+              <button
+                onClick={async () => {
+                  if (onNextChapter) {
+                    onNextChapter();
+                  } else {
+                    await ttsEngine.advanceToNextChapter();
+                  }
                 }}
-                className="w-full h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-              />
-              <div className="grid grid-cols-5 gap-1.5">
-                {[0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0, 4.0].map((rate) => (
-                  <button
-                    key={rate}
-                    onClick={() => {
-                      onUpdateSettings({ rate });
-                      ttsEngine.updateSettings({ rate });
-                    }}
-                    className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                      settings.rate === rate
-                        ? 'bg-amber-500 text-zinc-950 font-bold shadow-sm'
-                        : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                    }`}
-                  >
-                    {rate}x
-                  </button>
-                ))}
-              </div>
+                disabled={hasNextChapter === false}
+                className="p-2.5 sm:p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-zinc-300 hover:text-amber-400 transition-all active:scale-95 cursor-pointer"
+                title="Chương sau"
+              >
+                <SkipForward className="w-5 h-5" />
+              </button>
             </div>
 
-            {/* Ambient Background Sounds */}
-            <div className="w-full space-y-2">
-              <div className="flex justify-between items-center text-xs text-zinc-400">
-                <span className="flex items-center gap-1">
-                  <CloudRain className="w-3.5 h-3.5 text-blue-400" />
-                  Âm nền thư giãn
+            {/* Setting Icons Grid / Toolbar */}
+            <div className="w-full grid grid-cols-4 gap-2 pt-2 border-t border-zinc-800/80">
+              {/* Tab 1: Speed */}
+              <button
+                onClick={() => setActiveSettingTab(activeSettingTab === 'speed' ? null : 'speed')}
+                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all cursor-pointer ${
+                  activeSettingTab === 'speed'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'bg-zinc-800/70 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700/50'
+                }`}
+                title="Tùy chỉnh tốc độ đọc"
+              >
+                <Gauge className="w-4.5 h-4.5 mb-1" />
+                <span className="text-[11px] font-bold">{settings.rate}x</span>
+                <span className="text-[9px] text-zinc-400">Tốc độ</span>
+              </button>
+
+              {/* Tab 2: Voice */}
+              <button
+                onClick={() => setActiveSettingTab(activeSettingTab === 'voice' ? null : 'voice')}
+                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all cursor-pointer ${
+                  activeSettingTab === 'voice'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'bg-zinc-800/70 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700/50'
+                }`}
+                title="Chọn giọng đọc"
+              >
+                <Mic className="w-4.5 h-4.5 mb-1" />
+                <span className="text-[11px] font-bold truncate max-w-[68px]">
+                  {allVoices.find(v => v.id === settings.voiceURI)?.name.split(' ')[0] || 'Giọng đọc'}
                 </span>
+                <span className="text-[9px] text-zinc-400">Giọng đọc</span>
+              </button>
+
+              {/* Tab 3: Ambient */}
+              <button
+                onClick={() => setActiveSettingTab(activeSettingTab === 'ambient' ? null : 'ambient')}
+                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all cursor-pointer relative ${
+                  activeSettingTab === 'ambient'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'bg-zinc-800/70 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700/50'
+                }`}
+                title="Âm nền thư giãn"
+              >
                 {ambientType !== 'off' && (
-                  <span className="text-amber-400 text-[11px] font-medium">
-                    {Math.round(ambientVolume * 100)}%
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                )}
+                <CloudRain className="w-4.5 h-4.5 mb-1" />
+                <span className="text-[11px] font-bold">
+                  {ambientType !== 'off' ? `${Math.round(ambientVolume * 100)}%` : 'Tắt'}
+                </span>
+                <span className="text-[9px] text-zinc-400">Âm nền</span>
+              </button>
+
+              {/* Tab 4: Sleep Timer */}
+              <button
+                onClick={() => setActiveSettingTab(activeSettingTab === 'timer' ? null : 'timer')}
+                className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all cursor-pointer relative ${
+                  activeSettingTab === 'timer'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'bg-zinc-800/70 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-700/50'
+                }`}
+                title="Hẹn giờ tắt"
+              >
+                {countdownSeconds !== null && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                )}
+                <Timer className="w-4.5 h-4.5 mb-1" />
+                <span className="text-[11px] font-bold">
+                  {countdownSeconds !== null ? formatCountdown(countdownSeconds) : 'Tắt'}
+                </span>
+                <span className="text-[9px] text-zinc-400">Hẹn giờ</span>
+              </button>
+            </div>
+
+            {/* Collapsible Setting Detail Drawer */}
+            {activeSettingTab && (
+              <div className="w-full bg-zinc-950/70 border border-zinc-800 rounded-2xl p-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                {/* Drawer Header */}
+                <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
+                  <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                    {activeSettingTab === 'speed' && <><Gauge className="w-4 h-4" /> Tốc độ đọc audio ({settings.rate}x)</>}
+                    {activeSettingTab === 'voice' && <><Mic className="w-4 h-4" /> Giọng đọc Audio</>}
+                    {activeSettingTab === 'ambient' && <><CloudRain className="w-4 h-4" /> Âm nền thư giãn</>}
+                    {activeSettingTab === 'timer' && <><Timer className="w-4 h-4" /> Hẹn giờ tắt & Lắc máy gia hạn</>}
                   </span>
+                  <button
+                    onClick={() => setActiveSettingTab(null)}
+                    className="p-1 rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 cursor-pointer"
+                    title="Đóng bảng cài đặt"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Speed Details */}
+                {activeSettingTab === 'speed' && (
+                  <div className="space-y-3">
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="4.0"
+                      step="0.1"
+                      value={settings.rate || 1.0}
+                      onChange={(e) => {
+                        const rate = parseFloat(e.target.value);
+                        onUpdateSettings({ rate });
+                        ttsEngine.updateSettings({ rate });
+                      }}
+                      className="w-full h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {[0.8, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0, 4.0].map((rate) => (
+                        <button
+                          key={rate}
+                          onClick={() => {
+                            onUpdateSettings({ rate });
+                            ttsEngine.updateSettings({ rate });
+                          }}
+                          className={`py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                            settings.rate === rate
+                              ? 'bg-amber-500 text-zinc-950 font-bold shadow-sm'
+                              : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                          }`}
+                        >
+                          {rate}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Voice Details */}
+                {activeSettingTab === 'voice' && (
+                  <div className="space-y-2">
+                    <select
+                      value={settings.voiceURI || 'edge:vi-VN-NamMinhNeural'}
+                      onChange={(e) => {
+                        const voiceURI = e.target.value;
+                        const v = allVoices.find(x => x.id === voiceURI);
+                        onUpdateSettings({ voiceURI, engine: v?.category });
+                        ttsEngine.updateSettings({ voiceURI, engine: v?.category });
+                      }}
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                    >
+                      {allVoices.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name} • {v.badge}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-zinc-400">
+                      Hỗ trợ giọng AI Edge chất lượng cao và giọng máy Android đọc 100% không cần mạng.
+                    </p>
+                  </div>
+                )}
+
+                {/* Ambient Details */}
+                {activeSettingTab === 'ambient' && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {AMBIENT_SOUND_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => {
+                            setAmbientType(opt.id);
+                            ambientAudioService.setSound(opt.id);
+                          }}
+                          className={`py-2 px-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer text-center ${
+                            ambientType === opt.id
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
+                              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          <span className="truncate">{opt.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {ambientType !== 'off' && (
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex justify-between text-[11px] text-zinc-400">
+                          <span>Âm lượng âm nền</span>
+                          <span className="text-amber-400 font-semibold">{Math.round(ambientVolume * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={ambientVolume}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            setAmbientVolume(v);
+                            ambientAudioService.setVolume(v);
+                          }}
+                          className="w-full h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Sleep Timer Details */}
+                {activeSettingTab === 'timer' && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[15, 30, 45, null].map((mins, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            onUpdateSettings({ sleepTimerMinutes: mins });
+                            ttsEngine.setSleepTimer(mins);
+                          }}
+                          className={`py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                            settings.sleepTimerMinutes === mins
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
+                              : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {mins ? `${mins} phút` : 'Không hẹn'}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-zinc-400 bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800">
+                      <span className="flex items-center gap-1.5">
+                        <Smartphone className="w-3.5 h-3.5 text-amber-400" /> Lắc nhẹ máy gia hạn thêm 15 phút
+                      </span>
+                      <span className="font-semibold text-amber-400">
+                        {countdownSeconds !== null ? formatCountdown(countdownSeconds) : 'Đang tắt'}
+                      </span>
+                    </div>
+                  </div>
                 )}
               </div>
-              <div className="grid grid-cols-5 gap-1.5">
-                {AMBIENT_SOUND_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => {
-                      setAmbientType(opt.id);
-                      ambientAudioService.setSound(opt.id);
-                    }}
-                    className={`py-1.5 px-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer text-center ${
-                      ambientType === opt.id
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
-                        : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <span className="truncate">{opt.name}</span>
-                  </button>
-                ))}
-              </div>
-              {ambientType !== 'off' && (
-                <div className="pt-1">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={ambientVolume}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setAmbientVolume(v);
-                      ambientAudioService.setVolume(v);
-                    }}
-                    className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                  />
-                </div>
-              )}
-            </div>
+            )}
 
-            {/* Sleep Timer Options */}
-            <div className="w-full space-y-2">
-              <div className="flex justify-between text-xs text-zinc-400">
-                <span className="flex items-center gap-1">
-                  <Timer className="w-3.5 h-3.5 text-amber-400" />
-                  Hẹn giờ tắt
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {countdownSeconds !== null && (
-                    <span className="text-[10px] text-zinc-400 flex items-center gap-0.5">
-                      <Smartphone className="w-3 h-3 text-amber-400" /> Lắc máy: +15p
-                    </span>
-                  )}
-                  <span className="text-amber-400 font-semibold">
-                    {countdownSeconds !== null ? formatCountdown(countdownSeconds) : 'Tắt'}
-                  </span>
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-1.5">
-                {[15, 30, 45, null].map((mins, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => {
-                      onUpdateSettings({ sleepTimerMinutes: mins });
-                      ttsEngine.setSleepTimer(mins);
-                    }}
-                    className={`py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                      settings.sleepTimerMinutes === mins
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    {mins ? `${mins} phút` : 'Không hẹn'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 1-Click Offline Audio Download */}
+            {/* 1-Click Offline Audio Download Button */}
             {storyId && (
-              <div className="w-full">
+              <div className="w-full pt-1">
                 <button
                   disabled={isDownloading || totalSentences === 0}
                   onClick={handleDownloadAudio}
-                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 border border-zinc-700 text-xs text-zinc-200 font-medium transition-all cursor-pointer disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 active:scale-98 border border-zinc-700 text-xs text-zinc-200 font-medium transition-all cursor-pointer disabled:opacity-50"
                 >
                   {isDownloading ? (
                     <>
@@ -417,33 +572,10 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
                   ) : (
                     <>
                       <Download className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Tải Audio ngoại tuyến cả chương</span>
+                      <span>Tải Audio ngoại tuyến cả chương ({totalSentences} câu)</span>
                     </>
                   )}
                 </button>
-              </div>
-            )}
-
-            {/* Voice Selector */}
-            {allVoices.length > 0 && (
-              <div className="w-full">
-                <label className="text-xs text-zinc-400 block mb-1.5">Giọng đọc Audio</label>
-                <select
-                  value={settings.voiceURI || 'edge:vi-VN-NamMinhNeural'}
-                  onChange={(e) => {
-                    const voiceURI = e.target.value;
-                    const v = allVoices.find(x => x.id === voiceURI);
-                    onUpdateSettings({ voiceURI, engine: v?.category });
-                    ttsEngine.updateSettings({ voiceURI, engine: v?.category });
-                  }}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
-                >
-                  {allVoices.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name} • {v.badge}
-                    </option>
-                  ))}
-                </select>
               </div>
             )}
 

@@ -157,6 +157,11 @@ export const App: React.FC = () => {
         setCurrentSentenceText(text);
       },
       onTimeRemainingUpdate: (seconds) => setCountdownSeconds(seconds),
+      onChapterChange: (chapterNum) => {
+        if (chapterNum > 0) {
+          setCurrentChapterNumber(chapterNum);
+        }
+      },
       onChapterComplete: () => {
         if (ttsSettings.autoNextChapter && activeStory && activeStoryChapters.length > 0) {
           if (currentChapterNumber < activeStoryChapters.length) {
@@ -481,6 +486,26 @@ export const App: React.FC = () => {
         isInsideReader={!!activeStory}
         storyId={activeStory?.id}
         chapterNumber={currentChapterNumber}
+        onPreviousChapter={async () => {
+          if (activeStory && activeStoryChapters.length > 0) {
+            if (currentChapterNumber > 1) {
+              await handleSelectChapter(currentChapterNumber - 1, true);
+            }
+          } else {
+            await ttsEngine.advanceToPreviousChapter();
+          }
+        }}
+        onNextChapter={async () => {
+          if (activeStory && activeStoryChapters.length > 0) {
+            if (currentChapterNumber < activeStoryChapters.length) {
+              await handleSelectChapter(currentChapterNumber + 1, true);
+            }
+          } else {
+            await ttsEngine.advanceToNextChapter();
+          }
+        }}
+        hasPreviousChapter={activeStory ? currentChapterNumber > 1 : (ttsEngine.getCurrentChapterNumber() > 1)}
+        hasNextChapter={activeStory && activeStoryChapters.length > 0 ? currentChapterNumber < activeStoryChapters.length : true}
       />
 
       {/* File Import Modal (.txt, .epub, .pdf) */}

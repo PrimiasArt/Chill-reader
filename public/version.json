@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.17",
-  "versionCode": 117,
-  "buildTime": "2026-10-14T17:00:00Z",
+  "versionName": "1.0.18",
+  "versionCode": 118,
+  "buildTime": "2026-10-14T18:25:00Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "local",
-  "releaseNotes": "Bản cập nhật v1.0.17: Khắc phục triệt để lỗi app tự dừng/mất UI khi màn hình timeout (giữ WebView hoạt động ngầm liên tục, khôi phục native silent AudioTrack chuẩn 44.1kHz chống OS kill service, bảo vệ AudioFocus khi khóa màn hình)."
+  "releaseNotes": "Bản cập nhật v1.0.18: Sửa lỗi tràn viền tiêu đề đọc truyện trên mobile; Thu gọn cài đặt dạng Accordion; Gom cài đặt Audio Player thành các Icon tiện ích dạng ngăn kéo; Thêm nút chuyển chương trước và chương sau ngay trong Audio Player."
 }

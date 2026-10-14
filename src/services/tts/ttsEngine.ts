@@ -10,6 +10,7 @@ export type TTSState = 'idle' | 'playing' | 'paused';
 export interface TTSListener {
   onStateChange?: (state: TTSState) => void;
   onSentenceChange?: (sentenceIndex: number, sentenceText: string) => void;
+  onChapterChange?: (chapterNumber: number, chapterTitle: string) => void;
   onChapterComplete?: () => void;
   onTimeRemainingUpdate?: (secondsLeft: number | null) => void;
 }
@@ -543,6 +544,7 @@ class TTSEngine {
     this.sentences = this.splitIntoSentences(content);
     this.currentSentenceIndex = Math.max(0, Math.min(startFromSentenceIndex, Math.max(0, this.sentences.length - 1)));
     this.updateMediaSessionMetadata();
+    this.listeners.forEach(l => l.onChapterChange?.(this.currentChapterNumber, this.currentChapterTitle));
   }
 
   public play() {
@@ -1134,6 +1136,47 @@ class TTSEngine {
     }
   }
 
+  public async advanceToPreviousChapter(): Promise<boolean> {
+    if (!this.currentStoryId) return false;
+    try {
+      const chapters = await db.getStoryChapters(this.currentStoryId);
+      if (!chapters || chapters.length === 0) return false;
+      const prevChapterNum = (this.currentChapterNumber || 1) - 1;
+      if (prevChapterNum < 1) return false;
+      const prevChapter = chapters.find(c => c.chapterNumber === prevChapterNum);
+      if (!prevChapter) {
+        return false;
+      }
+
+      // Update story progress in DB
+      const progressPercent = Math.round((prevChapterNum / chapters.length) * 100);
+      await db.stories.update(this.currentStoryId, {
+        currentChapterNumber: prevChapterNum,
+        currentProgressPercent: progressPercent,
+        currentSentenceIndex: 0,
+        lastReadAt: Date.now()
+      });
+
+      this.loadChapter(
+        prevChapter.content,
+        {
+          title: this.currentBookTitle,
+          author: this.currentAuthor,
+          chapterTitle: prevChapter.title,
+          coverUrl: this.currentCoverUrl,
+          storyId: this.currentStoryId,
+          chapterNumber: prevChapter.chapterNumber
+        },
+        0
+      );
+      this.play();
+      return true;
+    } catch (err) {
+      console.warn('Failed to advance to previous chapter:', err);
+      return false;
+    }
+  }
+
   public onNativeChapterComplete() {
     if (this.settings.autoNextChapter && this.currentStoryId) {
       this.advanceToNextChapter().then((advanced) => {
@@ -1451,6 +1494,14 @@ class TTSEngine {
 
   public getCurrentSentenceIndex(): number {
     return this.currentSentenceIndex;
+  }
+
+  public getCurrentStoryId(): string {
+    return this.currentStoryId;
+  }
+
+  public getCurrentChapterNumber(): number {
+    return this.currentChapterNumber;
   }
 
   public getTotalSentences(): number {

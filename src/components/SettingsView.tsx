@@ -88,6 +88,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [updateCheckMsg, setUpdateCheckMsg] = useState<string | null>(null);
 
+  // Collapsible accordion sections state (collapsed by default for clean view)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  const toggleSection = (key: string) => {
+    setOpenSections(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const expandAll = () => {
+    setOpenSections({
+      cloud: true,
+      backup: true,
+      appearance: true,
+      audio: true,
+      ambient: true,
+      dictionary: true,
+      update: true,
+      storage: true
+    });
+  };
+
+  const collapseAll = () => {
+    setOpenSections({});
+  };
+
   useEffect(() => {
     supabaseSync.init().then(() => {
       setCloudConfig(supabaseSync.getConfig());
@@ -374,28 +401,51 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-      <div className="border-b border-zinc-800 pb-4">
-        <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg overflow-hidden bg-white p-0.5 border border-zinc-700/60 shadow-sm shrink-0 flex items-center justify-center">
-            <img src="/icon-192.png" alt="NKI Chill Reader" className="w-full h-full object-contain" />
-          </div>
-          Cài đặt & Đồng bộ cá nhân
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Quản lý đồng bộ Cloud, cấu hình đọc, bộ đọc giọng nói và chuyển đổi dữ liệu giữa các thiết bị
-        </p>
+      <div className="border-b border-zinc-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100 flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg overflow-hidden bg-white p-0.5 border border-zinc-700/60 shadow-sm shrink-0 flex items-center justify-center">
+              <img src="/icon-192.png" alt="NKI Chill Reader" className="w-full h-full object-contain" />
+            </div>
+            Cài đặt & Đồng bộ cá nhân
+          </h1>
+          <p className="text-sm text-zinc-400 mt-1">
+            Quản lý đồng bộ Cloud, cấu hình đọc, bộ đọc giọng nói và chuyển đổi dữ liệu giữa các thiết bị
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={expandAll}
+            className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition-colors cursor-pointer border border-zinc-700/60"
+          >
+            Mở tất cả
+          </button>
+          <button
+            type="button"
+            onClick={collapseAll}
+            className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-300 font-medium transition-colors cursor-pointer border border-zinc-700/60"
+          >
+            Thu gọn tất cả
+          </button>
+        </div>
       </div>
 
       {/* 1. CLOUD SYNC (SUPABASE) CARD */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden transition-all shadow-sm">
+        <button
+          type="button"
+          onClick={() => toggleSection('cloud')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
               <Cloud className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
-                Đồng bộ Online (Supabase Cloud)
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Đồng bộ Online (Supabase Cloud)</h3>
                 {supabaseSync.isConnected() || (cloudConfig.enabled && Boolean(cloudConfig.url && cloudConfig.anonKey)) ? (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 font-medium">
                     <CheckCircle2 className="w-3 h-3" /> Đã kết nối
@@ -405,22 +455,30 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
                     Chưa kích hoạt
                   </span>
                 )}
-              </h3>
-              <p className="text-xs text-zinc-400">
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
                 Tự động đồng bộ chương và câu đang đọc dở giữa Máy tính (Web) và Điện thoại (App Android)
               </p>
             </div>
           </div>
 
-          <button
-            onClick={handleSyncNow}
-            disabled={isSyncing}
-            className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-zinc-950 font-semibold text-xs transition-all cursor-pointer shrink-0 shadow-md shadow-amber-500/20"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
-          </button>
-        </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.cloud ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
+
+        {openSections.cloud && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-5 animate-in fade-in duration-200">
+            <div className="flex items-center justify-end pt-4">
+              <button
+                onClick={handleSyncNow}
+                disabled={isSyncing}
+                className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 disabled:opacity-50 text-zinc-950 font-semibold text-xs transition-all cursor-pointer shrink-0 shadow-md shadow-amber-500/20"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
+              </button>
+            </div>
 
         {syncStatusMsg && (
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2">
@@ -656,92 +714,165 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
           )}
         </div>
       </div>
+    )}
+  </div>
 
       {/* 2. MANUAL BACKUP & RESTORE (OFFLINE FILE) */}
-      <div className="bg-gradient-to-r from-amber-500/10 via-zinc-800 to-zinc-900 border border-amber-500/20 rounded-2xl p-5">
-        <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm mb-2">
-          <Sparkles className="w-4 h-4" />
-          Sao lưu thủ công bằng file (Backup JSON)
-        </div>
-        <p className="text-xs text-zinc-300 leading-relaxed mb-4">
-          Nếu không muốn dùng Cloud, bạn có thể xuất toàn bộ sách và tiến độ đọc ra file `.json` nhẹ tênh để lưu trữ hoặc gửi qua Zalo/Drive nạp vào máy khác.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={handleExportBackup}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            Xuất file sao lưu tủ sách (Backup JSON)
-          </button>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden transition-all shadow-sm">
+        <button
+          type="button"
+          onClick={() => toggleSection('backup')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+              <Download className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Sao lưu & Khôi phục Ngoại tuyến</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 font-medium">
+                  File JSON
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                Xuất file lưu trữ toàn bộ tủ sách hoặc khôi phục dữ liệu ngoại tuyến
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.backup ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
 
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 font-medium text-xs transition-all cursor-pointer"
-          >
-            <Upload className="w-4 h-4 text-amber-400" />
-            Khôi phục từ file sao lưu
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            className="hidden"
-            onChange={handleImportBackup}
-          />
-        </div>
+        {openSections.backup && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-4 animate-in fade-in duration-200">
+            <p className="text-xs text-zinc-300 leading-relaxed pt-3">
+              Nếu không muốn dùng Cloud, bạn có thể xuất toàn bộ sách và tiến độ đọc ra file <code className="text-amber-400 font-mono">.json</code> nhẹ tênh để lưu trữ hoặc gửi qua Zalo/Drive nạp vào máy khác.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={handleExportBackup}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                Xuất file sao lưu tủ sách (Backup JSON)
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 font-medium text-xs transition-all cursor-pointer"
+              >
+                <Upload className="w-4 h-4 text-amber-400" />
+                Khôi phục từ file sao lưu
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleImportBackup}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 3. READER APPEARANCE DEFAULTS */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <h3 className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
-          <Type className="w-4 h-4 text-amber-400" />
-          Giao diện đọc mặc định
-        </h3>
-        
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs text-zinc-400 block mb-1">Màu nền ưa thích</label>
-            <select
-              value={readerSettings.theme}
-              onChange={(e) => onUpdateReaderSettings({ theme: e.target.value as any })}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
-            >
-              <option value="sepia">Vàng giấy Sepia (Bảo vệ mắt)</option>
-              <option value="dark">Ban đêm Dark (Dịu nhẹ)</option>
-              <option value="amoled">OLED Đen kịt (Tiết kiệm pin)</option>
-              <option value="light">Sáng trắng cổ điển</option>
-            </select>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden transition-all shadow-sm">
+        <button
+          type="button"
+          onClick={() => toggleSection('appearance')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+              <Type className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Giao diện đọc mặc định</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 font-medium capitalize">
+                  {readerSettings.theme} • {readerSettings.fontFamily}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                Tùy chỉnh màu nền Sepia, Dark, AMOLED và phông chữ đọc tiểu thuyết
+              </p>
+            </div>
           </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.appearance ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
 
-          <div>
-            <label className="text-xs text-zinc-400 block mb-1">Kiểu phông chữ</label>
-            <select
-              value={readerSettings.fontFamily}
-              onChange={(e) => onUpdateReaderSettings({ fontFamily: e.target.value as any })}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
-            >
-              <option value="lora">Lora (Chữ có chân tiểu thuyết)</option>
-              <option value="merriweather">Merriweather (Sách báo)</option>
-              <option value="sans">Không chân (Hiện đại, dễ đọc)</option>
-            </select>
+        {openSections.appearance && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-4 animate-in fade-in duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3">
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1">Màu nền ưa thích</label>
+                <select
+                  value={readerSettings.theme}
+                  onChange={(e) => onUpdateReaderSettings({ theme: e.target.value as any })}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="sepia">Vàng giấy Sepia (Bảo vệ mắt)</option>
+                  <option value="dark">Ban đêm Dark (Dịu nhẹ)</option>
+                  <option value="amoled">OLED Đen kịt (Tiết kiệm pin)</option>
+                  <option value="light">Sáng trắng cổ điển</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1">Kiểu phông chữ</label>
+                <select
+                  value={readerSettings.fontFamily}
+                  onChange={(e) => onUpdateReaderSettings({ fontFamily: e.target.value as any })}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="lora">Lora (Chữ có chân tiểu thuyết)</option>
+                  <option value="merriweather">Merriweather (Sách báo)</option>
+                  <option value="sans">Không chân (Hiện đại, dễ đọc)</option>
+                </select>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* 4. TTS AUDIO & VOICE SETTINGS */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-5">
-        <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
-          <div>
-            <h3 className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
-              <Volume2 className="w-4 h-4 text-amber-400" />
-              Cấu hình Giọng đọc Audio (TTS)
-            </h3>
-            <p className="text-xs text-zinc-400 mt-0.5">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden transition-all shadow-sm">
+        <button
+          type="button"
+          onClick={() => toggleSection('audio')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+              <Volume2 className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Cấu hình Giọng đọc Audio (TTS)</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium truncate max-w-[130px]">
+                  {ttsSettings.voiceURI?.replace('edge:vi-VN-', '').replace('google:vi', 'Google') || 'Nam Minh'}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                Tốc độ {ttsSettings.rate}x • Cao độ {ttsSettings.pitch} • Giọng AI Neural & Native Android
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.audio ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
+
+        {openSections.audio && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-5 animate-in fade-in duration-200">
+            <p className="text-xs text-zinc-400 pt-3">
               Hỗ trợ giọng AI Neural truyền cảm tự nhiên, giọng Google và giọng có sẵn trên thiết bị
             </p>
-          </div>
-        </div>
 
         {/* Voice Selector with preview */}
         <div className="space-y-3">
@@ -954,210 +1085,267 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
             </div>
           </label>
         </div>
-      </div>
 
-      {/* BACKGROUND & LOCK SCREEN PLAYBACK OPTIMIZATION */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Lock className="w-5 h-5 text-amber-400" />
-            <h3 className="font-semibold text-sm text-zinc-100">Phát âm thanh khi khóa màn hình (Màn hình khóa)</h3>
-          </div>
-          <span className="text-xs text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-            Foreground Service
-          </span>
-        </div>
-        <p className="text-xs text-zinc-400 leading-relaxed">
-          Đã kích hoạt <strong>Dịch vụ chạy ngầm ưu tiên (Foreground Media Service)</strong> kèm khóa xung nhịp CPU (WakeLock) và mạng Wi-Fi (WifiLock) giúp nghe truyện trơn tru suốt đêm, không bị tạm dừng khi tắt màn hình và hiển thị đầy đủ bộ điều khiển trên Màn hình khóa của Android.
-        </p>
-
-        {typeof window !== 'undefined' && Boolean((window as any).AndroidMedia) && (
-          <div className="pt-2 border-t border-zinc-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="text-xs text-zinc-300">
-              <span className="font-medium text-amber-300">Mẹo cho Android (Xiaomi / Samsung / Oppo):</span>
-              <p className="text-zinc-400 mt-0.5">Cho phép ứng dụng chạy nền không hạn chế để hệ điều hành không tự ý đóng app khi màn hình tắt lâu.</p>
+        {/* BACKGROUND & LOCK SCREEN PLAYBACK OPTIMIZATION */}
+        <div className="bg-zinc-950/60 border border-zinc-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="w-5 h-5 text-amber-400" />
+              <h3 className="font-semibold text-sm text-zinc-100">Phát âm thanh khi khóa màn hình (Màn hình khóa)</h3>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                const androidMedia = (window as any).AndroidMedia;
-                if (androidMedia && typeof androidMedia.requestBatteryOptimizationExemption === 'function') {
-                  androidMedia.requestBatteryOptimizationExemption();
-                }
-              }}
-              className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shadow-xs"
-            >
-              Mở cài đặt Tối ưu pin
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* 5. AMBIENT BACKGROUND SOUNDS */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CloudRain className="w-5 h-5 text-amber-400" />
-            <h3 className="font-semibold text-sm text-zinc-100">Âm thanh nền thư giãn</h3>
-          </div>
-          {ambientType !== 'off' && (
-            <span className="text-xs text-amber-400 font-bold bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20">
-              Âm lượng: {Math.round(ambientVol * 100)}%
+            <span className="text-xs text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+              Foreground Service
             </span>
+          </div>
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            Đã kích hoạt <strong>Dịch vụ chạy ngầm ưu tiên (Foreground Media Service)</strong> kèm khóa xung nhịp CPU (WakeLock) và mạng Wi-Fi (WifiLock) giúp nghe truyện trơn tru suốt đêm, không bị tạm dừng khi tắt màn hình và hiển thị đầy đủ bộ điều khiển trên Màn hình khóa của Android.
+          </p>
+
+          {typeof window !== 'undefined' && Boolean((window as any).AndroidMedia) && (
+            <div className="pt-2 border-t border-zinc-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="text-xs text-zinc-300">
+                <span className="font-medium text-amber-300">Mẹo cho Android (Xiaomi / Samsung / Oppo):</span>
+                <p className="text-zinc-400 mt-0.5">Cho phép ứng dụng chạy nền không hạn chế để hệ điều hành không tự ý đóng app khi màn hình tắt lâu.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const androidMedia = (window as any).AndroidMedia;
+                  if (androidMedia && typeof androidMedia.requestBatteryOptimizationExemption === 'function') {
+                    androidMedia.requestBatteryOptimizationExemption();
+                  }
+                }}
+                className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shadow-xs"
+              >
+                Mở cài đặt Tối ưu pin
+              </button>
+            </div>
           )}
         </div>
-        <p className="text-xs text-zinc-400">
-          Tự động phối tiếng mưa rơi, củi lửa tí tách hoặc gió rừng trúc cùng giọng đọc truyện giúp ngủ ngon và thư giãn sâu.
-        </p>
+      </div>
+    )}
+  </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {AMBIENT_SOUND_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => {
-                setAmbientType(opt.id);
-                ambientAudioService.setSound(opt.id);
-              }}
-              className={`p-2.5 rounded-xl border text-xs font-medium transition-all text-left flex flex-col gap-1 cursor-pointer ${
-                ambientType === opt.id
-                  ? 'border-amber-500 bg-amber-500/10 text-amber-300 font-bold shadow-xs'
-                  : 'border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-zinc-700'
-              }`}
-            >
-              <span className="font-semibold text-xs">{opt.name}</span>
-              <span className="text-[10px] text-zinc-400 line-clamp-1">{opt.description}</span>
-            </button>
-          ))}
-        </div>
-
-        {ambientType !== 'off' && (
-          <div className="space-y-1.5 pt-2 border-t border-zinc-800">
-            <div className="flex justify-between text-xs text-zinc-400">
-              <span>Âm lượng âm nền</span>
-              <span className="font-semibold text-zinc-200">{Math.round(ambientVol * 100)}%</span>
+      {/* 5. AMBIENT BACKGROUND SOUNDS */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden transition-all shadow-sm">
+        <button
+          type="button"
+          onClick={() => toggleSection('ambient')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+              <CloudRain className="w-5 h-5" />
             </div>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={ambientVol}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                setAmbientVol(v);
-                ambientAudioService.setVolume(v);
-              }}
-              className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
-            />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Âm thanh nền thư giãn</h3>
+                {ambientType !== 'off' ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium">
+                    Đang bật: {Math.round(ambientVol * 100)}%
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700 font-medium">
+                    Đang tắt
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                Tự động phối tiếng mưa rơi, củi lửa tí tách hoặc gió rừng trúc cùng giọng đọc truyện
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.ambient ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
+
+        {openSections.ambient && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-4 animate-in fade-in duration-200">
+            <p className="text-xs text-zinc-400 pt-3">
+              Tự động phối tiếng mưa rơi, củi lửa tí tách hoặc gió rừng trúc cùng giọng đọc truyện giúp ngủ ngon và thư giãn sâu.
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {AMBIENT_SOUND_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => {
+                    setAmbientType(opt.id);
+                    ambientAudioService.setSound(opt.id);
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-medium transition-all text-left flex flex-col gap-1 cursor-pointer ${
+                    ambientType === opt.id
+                      ? 'border-amber-500 bg-amber-500/10 text-amber-300 font-bold shadow-xs'
+                      : 'border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-zinc-700'
+                  }`}
+                >
+                  <span className="font-semibold text-xs">{opt.name}</span>
+                  <span className="text-[10px] text-zinc-400 line-clamp-1">{opt.description}</span>
+                </button>
+              ))}
+            </div>
+
+            {ambientType !== 'off' && (
+              <div className="space-y-1.5 pt-2 border-t border-zinc-800">
+                <div className="flex justify-between text-xs text-zinc-400">
+                  <span>Âm lượng âm nền</span>
+                  <span className="font-semibold text-zinc-200">{Math.round(ambientVol * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={ambientVol}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setAmbientVol(v);
+                    ambientAudioService.setVolume(v);
+                  }}
+                  className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {/* 6. PRONUNCIATION DICTIONARY */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <SpellCheck className="w-5 h-5 text-amber-400" />
-            <h3 className="font-semibold text-sm text-zinc-100">Từ điển phát âm tuỳ chỉnh (TTS)</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleResetRules}
-              className="text-[11px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
-            >
-              Mặc định
-            </button>
-            <button
-              onClick={() => setShowAddRule(!showAddRule)}
-              className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-lg transition-all cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Thêm từ</span>
-            </button>
-          </div>
-        </div>
-        <p className="text-xs text-zinc-400">
-          Tự động thay thế các từ viết tắt, từ ngọng (vd: <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">ko</code> ➔ <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">không</code>, <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">main</code> ➔ <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">nhân vật chính</code>) để giọng đọc phát âm chuẩn xác nhất.
-        </p>
-
-        {showAddRule && (
-          <form onSubmit={handleAddRule} className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2.5 animate-in fade-in">
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="text"
-                placeholder="Từ gốc trong truyện (vd: ad, cv, bl...)"
-                value={newPattern}
-                onChange={(e) => setNewPattern(e.target.value)}
-                required
-                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
-              />
-              <input
-                type="text"
-                placeholder="Từ đọc thay thế (vd: admin, dịch, bình luận...)"
-                value={newReplacement}
-                onChange={(e) => setNewReplacement(e.target.value)}
-                required
-                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
-              />
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('dictionary')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+              <SpellCheck className="w-5 h-5" />
             </div>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowAddRule(false)}
-                className="px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200"
-              >
-                Hủy
-              </button>
-              <button
-                type="submit"
-                className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-lg cursor-pointer"
-              >
-                Lưu quy tắc
-              </button>
-            </div>
-          </form>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
-          {pronRules.map((r) => (
-            <div
-              key={r.id}
-              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
-                r.enabled
-                  ? 'bg-zinc-950/70 border-zinc-800'
-                  : 'bg-zinc-950/30 border-zinc-800/40 opacity-50'
-              }`}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <input
-                  type="checkbox"
-                  checked={r.enabled}
-                  onChange={() => handleToggleRule(r.id)}
-                  className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
-                />
-                <span className="font-mono text-zinc-300 font-semibold">{r.pattern.replace(/\\b/g, '')}</span>
-                <span className="text-zinc-500">➔</span>
-                <span className="text-amber-400 font-medium truncate">{r.replacement}</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Từ điển phát âm tuỳ chỉnh (TTS)</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 font-mono border border-zinc-700">
+                  {pronRules.filter(r => r.enabled).length}/{pronRules.length} từ
+                </span>
               </div>
-              <button
-                onClick={() => handleDeleteRule(r.id)}
-                className="text-zinc-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                Tự động sửa các từ viết tắt, từ lóng (ko ➔ không, main ➔ nhân vật chính...)
+              </p>
             </div>
-          ))}
-        </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.dictionary ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
+
+        {openSections.dictionary && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-4 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between pt-3">
+              <p className="text-xs text-zinc-400">
+                Tự động thay thế các từ viết tắt, từ ngọng (vd: <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">ko</code> ➔ <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">không</code>, <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">main</code> ➔ <code className="bg-zinc-800 px-1 py-0.5 rounded text-amber-300">nhân vật chính</code>) để giọng đọc phát âm chuẩn xác nhất.
+              </p>
+              <div className="flex items-center gap-2 shrink-0 ml-3">
+                <button
+                  onClick={handleResetRules}
+                  className="text-[11px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+                >
+                  Mặc định
+                </button>
+                <button
+                  onClick={() => setShowAddRule(!showAddRule)}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-lg transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Thêm từ</span>
+                </button>
+              </div>
+            </div>
+
+            {showAddRule && (
+              <form onSubmit={handleAddRule} className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-2.5 animate-in fade-in">
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Từ gốc trong truyện (vd: ad, cv, bl...)"
+                    value={newPattern}
+                    onChange={(e) => setNewPattern(e.target.value)}
+                    required
+                    className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Từ đọc thay thế (vd: admin, dịch, bình luận...)"
+                    value={newReplacement}
+                    onChange={(e) => setNewReplacement(e.target.value)}
+                    required
+                    className="bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddRule(false)}
+                    className="px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-lg cursor-pointer"
+                  >
+                    Lưu quy tắc
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+              {pronRules.map((r) => (
+                <div
+                  key={r.id}
+                  className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                    r.enabled
+                      ? 'bg-zinc-950/70 border-zinc-800'
+                      : 'bg-zinc-950/30 border-zinc-800/40 opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={r.enabled}
+                      onChange={() => handleToggleRule(r.id)}
+                      className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
+                    />
+                    <span className="font-mono text-zinc-300 font-semibold">{r.pattern.replace(/\\b/g, '')}</span>
+                    <span className="text-zinc-500">➔</span>
+                    <span className="text-amber-400 font-medium truncate">{r.replacement}</span>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteRule(r.id)}
+                    className="text-zinc-500 hover:text-red-400 p-1 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 7. APP UPDATES (AUTO UPDATE & CHECK FOR UPDATES) */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('update')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
               <Sparkles className="w-5 h-5 text-amber-400" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-semibold text-sm text-zinc-100">Cập nhật ứng dụng</h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 font-mono border border-zinc-700">
@@ -1169,103 +1357,146 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
                   </span>
                 )}
               </div>
-              <p className="text-xs text-zinc-400 mt-0.5">
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
                 Kiểm tra và tự động nâng cấp ứng dụng Chill Reader trực tiếp không cần gỡ bản cũ
               </p>
             </div>
           </div>
-        </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.update ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
 
-        {/* Status message */}
-        {updateCheckMsg && (
-          <div className="text-xs p-3 rounded-xl bg-zinc-800/80 border border-zinc-700/60 flex items-center gap-2 text-zinc-200">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>{updateCheckMsg}</span>
+        {openSections.update && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-4 animate-in fade-in duration-200">
+            <p className="text-xs text-zinc-400 pt-3">
+              Kiểm tra và tự động nâng cấp ứng dụng Chill Reader trực tiếp không cần gỡ bản cũ. Tự động kiểm tra file APK từ kho phát hành GitHub.
+            </p>
+
+            {/* Status message */}
+            {updateCheckMsg && (
+              <div className="text-xs p-3 rounded-xl bg-zinc-800/80 border border-zinc-700/60 flex items-center gap-2 text-zinc-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{updateCheckMsg}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {updateState.updateAvailable?.hasUpdate ? (
+                <button
+                  type="button"
+                  onClick={() => setIsUpdateModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-98 text-zinc-950 text-xs font-bold transition-all shadow-md shadow-amber-500/20 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Cập nhật ngay ({updateState.updateAvailable.latestVersion?.versionName})</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={updateState.isChecking}
+                  onClick={handleCheckUpdate}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 text-zinc-200 text-xs font-semibold border border-zinc-700 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {updateState.isChecking ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                      <span>Đang kiểm tra...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Kiểm tra cập nhật</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const url = updateState.updateAvailable?.latestVersion?.downloadUrl || 
+                    'https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk';
+                  window.open(url, '_blank');
+                }}
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors cursor-pointer"
+                title="Tải tệp APK trực tiếp từ trình duyệt"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Tải file APK trực tiếp</span>
+              </button>
+            </div>
           </div>
         )}
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {updateState.updateAvailable?.hasUpdate ? (
-            <button
-              type="button"
-              onClick={() => setIsUpdateModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-98 text-zinc-950 text-xs font-bold transition-all shadow-md shadow-amber-500/20 cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              <span>Cập nhật ngay ({updateState.updateAvailable.latestVersion?.versionName})</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={updateState.isChecking}
-              onClick={handleCheckUpdate}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 text-zinc-200 text-xs font-semibold border border-zinc-700 transition-all cursor-pointer disabled:opacity-50"
-            >
-              {updateState.isChecking ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                  <span>Đang kiểm tra...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Kiểm tra cập nhật</span>
-                </>
-              )}
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => {
-              const url = updateState.updateAvailable?.latestVersion?.downloadUrl || 
-                'https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk';
-              window.open(url, '_blank');
-            }}
-            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-medium border border-zinc-800 transition-colors cursor-pointer"
-            title="Tải tệp APK trực tiếp từ trình duyệt"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Tải file APK trực tiếp</span>
-          </button>
-        </div>
       </div>
 
-      {/* 8. DATA RESET */}
-      <div className="space-y-3">
-        {/* Offline Audio Cache Reset */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-sm text-zinc-100">Bộ nhớ Cache Audio ngoại tuyến</h3>
-            <p className="text-xs text-zinc-400 mt-0.5">Xóa toàn bộ các tệp âm thanh đã tải về để nghe offline nhằm giải phóng dung lượng máy</p>
-            {clearedAudioMsg && (
-              <span className="text-xs text-emerald-400 font-medium mt-1 block">{clearedAudioMsg}</span>
-            )}
+      {/* 8. DATA RESET & STORAGE */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('storage')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Quản lý bộ nhớ & Dữ liệu</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700 font-medium">
+                  Cache & Dọn dẹp
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                Dọn bộ nhớ đệm audio đã tải hoặc xóa toàn bộ dữ liệu truyện offline
+              </p>
+            </div>
           </div>
-          <button
-            onClick={handleClearAudioCache}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-medium transition-colors cursor-pointer shrink-0"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Xóa Audio Cache
-          </button>
-        </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.storage ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
 
-        {/* Full Stories Reset */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-sm text-zinc-100">Dọn dẹp toàn bộ dữ liệu truyện</h3>
-            <p className="text-xs text-zinc-400 mt-0.5">Xóa toàn bộ các truyện và chương đã lưu trong IndexedDB của máy</p>
+        {openSections.storage && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-4 animate-in fade-in duration-200">
+            <div className="pt-3 space-y-3">
+              {/* Offline Audio Cache Reset */}
+              <div className="bg-zinc-950/60 border border-zinc-800 rounded-xl p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h4 className="font-semibold text-xs text-zinc-200">Bộ nhớ Cache Audio ngoại tuyến</h4>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">Xóa toàn bộ các tệp âm thanh đã tải về để nghe offline nhằm giải phóng dung lượng máy</p>
+                  {clearedAudioMsg && (
+                    <span className="text-xs text-emerald-400 font-medium mt-1 block">{clearedAudioMsg}</span>
+                  )}
+                </div>
+                <button
+                  onClick={handleClearAudioCache}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-medium transition-colors cursor-pointer shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Xóa Audio Cache
+                </button>
+              </div>
+
+              {/* Full Stories Reset */}
+              <div className="bg-zinc-950/60 border border-zinc-800 rounded-xl p-4 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <h4 className="font-semibold text-xs text-zinc-200">Dọn dẹp toàn bộ dữ liệu truyện</h4>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">Xóa toàn bộ các truyện và chương đã lưu trong IndexedDB của máy</p>
+                </div>
+                <button
+                  onClick={handleClearAll}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition-colors cursor-pointer shrink-0"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Xóa toàn bộ
+                </button>
+              </div>
+            </div>
           </div>
-          <button
-            onClick={handleClearAll}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium transition-colors cursor-pointer shrink-0"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Xóa toàn bộ
-          </button>
-        </div>
+        )}
       </div>
 
       {/* App Info */}

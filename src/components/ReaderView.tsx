@@ -20,7 +20,8 @@ import {
   FileDown,
   BookMarked,
   Quote,
-  Sparkles
+  Sparkles,
+  MoreVertical
 } from 'lucide-react';
 import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily, CrawlSearchResult } from '../types';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
@@ -72,6 +73,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [selectedQuoteText, setSelectedQuoteText] = useState('');
   const [showAiSummaryModal, setShowAiSummaryModal] = useState(false);
+  const [showMoreToolsModal, setShowMoreToolsModal] = useState(false);
 
   const handleOpenQuoteModal = () => {
     let text = '';
@@ -547,19 +549,19 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       <div 
         className={`fixed top-0 left-0 right-0 z-30 transition-transform duration-300 ${
           showControls ? 'translate-y-0' : '-translate-y-full'
-        } bg-zinc-900/90 backdrop-blur-md border-b border-zinc-800 text-zinc-100 shadow-md`}
+        } pt-[env(safe-area-inset-top,0px)] bg-zinc-900/95 backdrop-blur-md border-b border-zinc-800 text-zinc-100 shadow-md`}
       >
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+        <div className="max-w-4xl mx-auto px-3 sm:px-4 h-14 flex items-center justify-between gap-2">
           {/* Back & Chapter Info */}
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <button
               onClick={onBackToLibrary}
-              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer shrink-0"
               title="Quay lại tủ sách"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1 pr-1">
               <h2 className="text-xs font-semibold truncate text-zinc-200">
                 {story.title}
               </h2>
@@ -570,7 +572,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           </div>
 
           {/* Right Action Icons */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* TTS Toggle Button */}
             <button
               disabled={chapters.length === 0}
@@ -582,7 +584,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   onToggleTTS();
                 }
               }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-medium transition-all shrink-0 ${
                 chapters.length === 0
                   ? 'opacity-40 cursor-not-allowed bg-zinc-800 text-zinc-500 border border-zinc-700'
                   : ttsState === 'playing'
@@ -594,53 +596,58 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               title={chapters.length === 0 ? 'Chưa có nội dung để đọc audio' : 'Nghe audio chương này'}
             >
               <Headphones className="w-3.5 h-3.5" />
-              <span>{ttsState === 'playing' ? 'Đang nghe' : (ttsState === 'paused' ? 'Tạm dừng' : 'Nghe audio')}</span>
+              <span className="text-[11px] hidden xs:inline sm:inline">
+                {ttsState === 'playing' ? 'Đang nghe' : (ttsState === 'paused' ? 'Tạm dừng' : 'Nghe')}
+              </span>
             </button>
 
-            {/* Story Lore & Character Notes */}
-            <button
-              onClick={() => setShowNotesDrawer(true)}
-              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
-              title="Sổ tay nhân vật & cảnh giới tu tiên"
-            >
-              <BookMarked className="w-5 h-5" />
-            </button>
-
-            {/* Check for new chapters if online story */}
-            {story.sourceUrl && (
+            {/* Desktop Quick Shortcuts (Visible on md+ screens) */}
+            <div className="hidden md:flex items-center gap-1">
+              {/* Story Lore & Character Notes */}
               <button
-                disabled={isCheckingNewChapters}
-                onClick={handleCheckNewChapters}
-                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer disabled:opacity-40"
-                title="Kiểm tra & tải thêm chương mới"
+                onClick={() => setShowNotesDrawer(true)}
+                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
+                title="Sổ tay nhân vật & cảnh giới tu tiên"
               >
-                <RefreshCw className={`w-5 h-5 ${isCheckingNewChapters ? 'animate-spin text-amber-400' : ''}`} />
+                <BookMarked className="w-5 h-5" />
               </button>
-            )}
 
-            {/* AI Summary & Story Recap */}
-            <button
-              onClick={() => setShowAiSummaryModal(true)}
-              className="p-2 rounded-lg hover:bg-zinc-800 text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
-              title="Trợ lý AI Gemini: Tóm tắt chương & nhắc lại cốt truyện"
-            >
-              <Sparkles className="w-5 h-5" />
-            </button>
+              {/* Check for new chapters if online story */}
+              {story.sourceUrl && (
+                <button
+                  disabled={isCheckingNewChapters}
+                  onClick={handleCheckNewChapters}
+                  className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer disabled:opacity-40"
+                  title="Kiểm tra & tải thêm chương mới"
+                >
+                  <RefreshCw className={`w-5 h-5 ${isCheckingNewChapters ? 'animate-spin text-amber-400' : ''}`} />
+                </button>
+              )}
 
-            {/* Quote Card Generator */}
-            <button
-              onClick={handleOpenQuoteModal}
-              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
-              title="Tạo thẻ trích dẫn nghệ thuật"
-            >
-              <Quote className="w-5 h-5" />
-            </button>
+              {/* AI Summary & Story Recap */}
+              <button
+                onClick={() => setShowAiSummaryModal(true)}
+                className="p-2 rounded-lg hover:bg-zinc-800 text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                title="Trợ lý AI Gemini: Tóm tắt chương & nhắc lại cốt truyện"
+              >
+                <Sparkles className="w-5 h-5" />
+              </button>
 
-            {/* Table of contents */}
+              {/* Quote Card Generator */}
+              <button
+                onClick={handleOpenQuoteModal}
+                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
+                title="Tạo thẻ trích dẫn nghệ thuật"
+              >
+                <Quote className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Table of contents (All devices) */}
             <button
               disabled={chapters.length === 0}
               onClick={() => setShowTocDrawer(true)}
-              className={`p-2 rounded-lg text-zinc-400 transition-colors ${
+              className={`p-2 rounded-lg text-zinc-400 transition-colors shrink-0 ${
                 chapters.length === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-800 hover:text-zinc-100 cursor-pointer'
               }`}
               title="Mục lục chương"
@@ -648,13 +655,22 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               <List className="w-5 h-5" />
             </button>
 
-            {/* Settings */}
+            {/* Settings (All devices) */}
             <button
               onClick={() => setShowSettingsModal(!showSettingsModal)}
-              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer shrink-0"
               title="Tùy chỉnh giao diện đọc"
             >
               <Settings2 className="w-5 h-5" />
+            </button>
+
+            {/* More Menu Dropdown for Mobile */}
+            <button
+              onClick={() => setShowMoreToolsModal(true)}
+              className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer shrink-0 md:hidden"
+              title="Tiện ích & Tính năng mở rộng"
+            >
+              <MoreVertical className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -1345,6 +1361,144 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           currentChapter={currentChapter}
           previousChapters={chapters.filter(c => c.chapterNumber < currentChapterNumber)}
         />
+      )}
+
+      {/* Mobile Tools Drawer / Bottom Sheet */}
+      {showMoreToolsModal && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200"
+          onClick={() => setShowMoreToolsModal(false)}
+        >
+          <div 
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-t-3xl sm:rounded-2xl p-5 space-y-2 text-zinc-100 shadow-2xl animate-in slide-in-from-bottom-4 duration-200 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400">Tiện ích chương truyện</h3>
+              <button 
+                onClick={() => setShowMoreToolsModal(false)}
+                className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1 pt-1">
+              {/* AI Recap */}
+              <button
+                onClick={() => {
+                  setShowMoreToolsModal(false);
+                  setShowAiSummaryModal(true);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <Sparkles className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-100">Trợ lý AI Gemini</h4>
+                  <p className="text-[11px] text-zinc-400">Tóm tắt chương & nhắc lại diễn biến cốt truyện</p>
+                </div>
+              </button>
+
+              {/* Character Lore */}
+              <button
+                onClick={() => {
+                  setShowMoreToolsModal(false);
+                  setShowNotesDrawer(true);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+                  <BookMarked className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-100">Sổ tay nhân vật & Cảnh giới</h4>
+                  <p className="text-[11px] text-zinc-400">Ghi chép công pháp, nhân vật tu tiên</p>
+                </div>
+              </button>
+
+              {/* Quote Card */}
+              <button
+                onClick={() => {
+                  setShowMoreToolsModal(false);
+                  handleOpenQuoteModal();
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Quote className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-100">Thẻ trích dẫn nghệ thuật</h4>
+                  <p className="text-[11px] text-zinc-400">Tạo ảnh trích dẫn câu văn hay để chia sẻ</p>
+                </div>
+              </button>
+
+              {/* Check new chapters */}
+              {story.sourceUrl && (
+                <button
+                  disabled={isCheckingNewChapters}
+                  onClick={() => {
+                    setShowMoreToolsModal(false);
+                    handleCheckNewChapters();
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer disabled:opacity-40"
+                >
+                  <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+                    <RefreshCw className={`w-4.5 h-4.5 ${isCheckingNewChapters ? 'animate-spin' : ''}`} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-zinc-100">Kiểm tra chương mới</h4>
+                    <p className="text-[11px] text-zinc-400">Quét nguồn online tải các chương mới phát hành</p>
+                  </div>
+                </button>
+              )}
+
+              {/* Download chapter audio */}
+              <button
+                disabled={isDownloadingAudio || sentences.length === 0}
+                onClick={() => {
+                  setShowMoreToolsModal(false);
+                  handleDownloadChapterAudio();
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer disabled:opacity-40"
+              >
+                <div className="w-9 h-9 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center text-yellow-400 shrink-0">
+                  <Download className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-100">Tải Audio ngoại tuyến</h4>
+                  <p className="text-[11px] text-zinc-400">Tải sẵn giọng đọc cả chương để nghe không cần mạng</p>
+                </div>
+              </button>
+
+              {/* Export EPUB / TXT */}
+              <div className="pt-2 border-t border-zinc-800 grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    setShowMoreToolsModal(false);
+                    handleExportEpub();
+                  }}
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-300 transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-4 h-4 text-amber-400" />
+                  Xuất EPUB
+                </button>
+                <button
+                  onClick={() => {
+                    setShowMoreToolsModal(false);
+                    handleExportTxt();
+                  }}
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-300 transition-colors cursor-pointer"
+                >
+                  <FileDown className="w-4 h-4 text-amber-400" />
+                  Xuất TXT
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
