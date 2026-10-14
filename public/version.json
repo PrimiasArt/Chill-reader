@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.18",
-  "versionCode": 118,
-  "buildTime": "2026-10-14T18:25:00Z",
-  "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
-  "commit": "local",
-  "releaseNotes": "Bản cập nhật v1.0.18: Sửa lỗi tràn viền tiêu đề đọc truyện trên mobile; Thu gọn cài đặt dạng Accordion; Gom cài đặt Audio Player thành các Icon tiện ích dạng ngăn kéo; Thêm nút chuyển chương trước và chương sau ngay trong Audio Player."
+  "versionName": "1.0.39",
+  "versionCode": 139,
+  "buildTime": "2026-10-14T18:27:00Z",
+  "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/v1.0.39/ChillReader-v1.0.apk",
+  "commit": "e0d49f7",
+  "releaseNotes": "Bản cập nhật v1.0.39: Sửa tràn viền thanh tiêu đề đọc truyện trên mobile; Thu gọn cài đặt dạng Accordion; Gom cài đặt Audio Player thành các Icon tiện ích; Thêm nút chuyển chương trước/sau trực tiếp trong trình phát audio."
 }
