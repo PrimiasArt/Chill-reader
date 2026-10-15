@@ -20,6 +20,9 @@ import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioPlaybackConfiguration;
 import android.media.AudioTrack;
+import android.media.MediaPlayer;
+import android.media.PlaybackParams;
+import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -39,12 +42,15 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -125,6 +131,12 @@ public class MediaPlaybackService extends Service {
     private volatile boolean isNativeTtsMode = false;
     private volatile String selectedVoiceName = "";
     private volatile String currentSpeakingUtteranceId = "";
+
+    // Online Audio Player (for Edge TTS / Google TTS native background streaming)
+    private MediaPlayer onlinePlayer = null;
+    private volatile int currentOnlineSentenceToken = 0;
+    private final ExecutorService onlineTtsExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService prefetchExecutor = Executors.newFixedThreadPool(2);
 
     private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
     private volatile String lastCoverUrl = null;
@@ -795,6 +807,11 @@ public class MediaPlaybackService extends Service {
         return isCallActive();
     }
 
+    private boolean isOnlineVoice(String voice) {
+        if (voice == null || voice.trim().isEmpty()) return true; // Default voice is Edge TTS!
+        return !voice.startsWith("native:") && !"android".equalsIgnoreCase(voice);
+    }
+
     private void applySelectedVoice() {
         if (nativeTts == null || !isNativeTtsReady) return;
         try {
@@ -938,22 +955,337 @@ public class MediaPlaybackService extends Service {
             requestAudioFocus();
             acquireLocks();
 
-            if (isNativeTtsReady && nativeTts != null) {
-                applySelectedVoice();
+            if (isOnlineVoice(selectedVoiceName)) {
+                if (nativeTts != null) {
+                    try { nativeTts.stop(); } catch (Throwable ignored) {}
+                }
+                cleanOldTtsCache();
                 renderNotificationAndForeground(true, coverUrl);
                 playCurrentNativeSentence();
             } else {
-                initNativeTts();
-                renderNotificationAndForeground(true, coverUrl);
+                if (onlinePlayer != null) {
+                    try { onlinePlayer.reset(); } catch (Throwable ignored) {}
+                }
+                if (isNativeTtsReady && nativeTts != null) {
+                    applySelectedVoice();
+                    renderNotificationAndForeground(true, coverUrl);
+                    playCurrentNativeSentence();
+                } else {
+                    initNativeTts();
+                    renderNotificationAndForeground(true, coverUrl);
+                }
             }
         } catch (Throwable t) {
             t.printStackTrace();
         }
     }
 
+    private String md5(String s) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("MD5");
+            digest.update(s.getBytes("UTF-8"));
+            byte[] messageDigest = digest.digest();
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : messageDigest) {
+                String h = Integer.toHexString(0xFF & b);
+                while (h.length() < 2) h = "0" + h;
+                hexString.append(h);
+            }
+            return hexString.toString();
+        } catch (Throwable t) {
+            return String.valueOf(Math.abs(s.hashCode()));
+        }
+    }
+
+    private File getCacheFileForSentence(String voice, float rate, float pitch, String text) {
+        File cacheDir = new File(getCacheDir(), "tts_cache");
+        if (!cacheDir.exists()) {
+            cacheDir.mkdirs();
+        }
+        String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
+        String key = cleanVoice + "_" + rate + "_" + pitch + "_" + text;
+        return new File(cacheDir, "sent_" + md5(key) + ".mp3");
+    }
+
+    private void cleanOldTtsCache() {
+        onlineTtsExecutor.submit(() -> {
+            try {
+                File cacheDir = new File(getCacheDir(), "tts_cache");
+                if (!cacheDir.exists() || !cacheDir.isDirectory()) return;
+                File[] files = cacheDir.listFiles();
+                if (files == null || files.length == 0) return;
+
+                long now = System.currentTimeMillis();
+                long maxAge = 2L * 24L * 60L * 60L * 1000L; // 2 days
+                long totalSize = 0;
+
+                for (File f : files) {
+                    if (now - f.lastModified() > maxAge) {
+                        f.delete();
+                    } else {
+                        totalSize += f.length();
+                    }
+                }
+
+                if (totalSize > 80L * 1024L * 1024L) {
+                    java.util.Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+                    for (File f : files) {
+                        if (f.exists()) {
+                            long len = f.length();
+                            if (f.delete()) {
+                                totalSize -= len;
+                                if (totalSize < 40L * 1024L * 1024L) break;
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+        });
+    }
+
+    private boolean downloadSentenceAudio(String voice, float rate, float pitch, String text, File destFile) {
+        if (destFile.exists() && destFile.length() > 512) {
+            return true;
+        }
+
+        File tempFile = new File(destFile.getAbsolutePath() + ".tmp_" + System.currentTimeMillis());
+        HttpURLConnection conn = null;
+        InputStream in = null;
+        FileOutputStream out = null;
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
+                float serverRate = cleanVoice.startsWith("google") ? 1.0f : Math.min(2.0f, Math.max(0.5f, rate));
+
+                String urlStr = "https://chill-reader.vercel.app/api/tts?voice=" 
+                    + URLEncoder.encode(cleanVoice, "UTF-8")
+                    + "&rate=" + serverRate
+                    + "&pitch=" + pitch
+                    + "&text=" + URLEncoder.encode(text, "UTF-8");
+
+                URL url = new URL(urlStr);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(12000);
+                conn.setRequestProperty("User-Agent", "ChillReader-Android/1.0");
+
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    in = conn.getInputStream();
+                    out = new FileOutputStream(tempFile);
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                    out.flush();
+                    out.close();
+                    out = null;
+                    in.close();
+                    in = null;
+
+                    if (tempFile.length() > 512) {
+                        if (destFile.exists()) destFile.delete();
+                        return tempFile.renameTo(destFile);
+                    }
+                }
+            } catch (Throwable t) {
+                try { Thread.sleep(250); } catch (InterruptedException ignored) {}
+            } finally {
+                try { if (in != null) in.close(); } catch (Throwable ignored) {}
+                try { if (out != null) out.close(); } catch (Throwable ignored) {}
+                try { if (conn != null) conn.disconnect(); } catch (Throwable ignored) {}
+                if (tempFile.exists() && !destFile.exists()) {
+                    tempFile.delete();
+                }
+            }
+        }
+        return false;
+    }
+
+    private void prefetchOnlineSentence(final int index) {
+        if (index < 0 || index >= nativeSentences.size()) return;
+        final String text = nativeSentences.get(index);
+        if (!hasReadableText(text)) return;
+
+        prefetchExecutor.submit(() -> {
+            try {
+                File cacheFile = getCacheFileForSentence(selectedVoiceName, nativeRate, nativePitch, text);
+                if (cacheFile.exists() && cacheFile.length() > 512) {
+                    return;
+                }
+                downloadSentenceAudio(selectedVoiceName, nativeRate, nativePitch, text, cacheFile);
+            } catch (Throwable ignored) {}
+        });
+    }
+
+    private void playCurrentOnlineSentence() {
+        cancelTtsWatchdog();
+        if (!isNativeTtsMode || !sIsPlaying) return;
+
+        while (nativeSentenceIndex < nativeSentences.size() && !hasReadableText(nativeSentences.get(nativeSentenceIndex))) {
+            nativeSentenceIndex++;
+        }
+
+        if (nativeSentenceIndex >= nativeSentences.size()) {
+            sIsPlaying = false;
+            cancelTtsWatchdog();
+            scheduleGracefulTeardown();
+            MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeChapterComplete && window.ttsEngine.onNativeChapterComplete()");
+            return;
+        }
+
+        currentSentenceIndex = nativeSentenceIndex;
+        currentTotalSentences = nativeSentences.size();
+        acquireLocks();
+
+        if (!isForegroundRunning) {
+            renderNotificationAndForeground(true, lastCoverUrl);
+        } else if (mediaSession != null) {
+            try {
+                long actions = PlaybackStateCompat.ACTION_PLAY |
+                               PlaybackStateCompat.ACTION_PAUSE |
+                               PlaybackStateCompat.ACTION_PLAY_PAUSE |
+                               PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
+                               PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
+                               PlaybackStateCompat.ACTION_STOP |
+                               PlaybackStateCompat.ACTION_SEEK_TO;
+                PlaybackStateCompat state = new PlaybackStateCompat.Builder()
+                    .setActions(actions)
+                    .setState(
+                        PlaybackStateCompat.STATE_PLAYING,
+                        (long) currentSentenceIndex * 1000L,
+                        1.0f
+                    )
+                    .build();
+                mediaSession.setPlaybackState(state);
+            } catch (Throwable ignored) {}
+        }
+
+        final int token = ++currentOnlineSentenceToken;
+        final int targetIndex = nativeSentenceIndex;
+        final String rawSentence = nativeSentences.get(targetIndex);
+
+        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + targetIndex + ")");
+
+        final File cacheFile = getCacheFileForSentence(selectedVoiceName, nativeRate, nativePitch, rawSentence);
+
+        if (cacheFile.exists() && cacheFile.length() > 512) {
+            playAudioFile(cacheFile, token, targetIndex);
+            return;
+        }
+
+        onlineTtsExecutor.submit(() -> {
+            if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
+            boolean ok = downloadSentenceAudio(selectedVoiceName, nativeRate, nativePitch, rawSentence, cacheFile);
+            if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
+
+            if (ok && cacheFile.exists() && cacheFile.length() > 512) {
+                playAudioFile(cacheFile, token, targetIndex);
+            } else {
+                mainHandler.postDelayed(() -> {
+                    if (token == currentOnlineSentenceToken && isNativeTtsMode && sIsPlaying) {
+                        nativeSentenceIndex++;
+                        playCurrentNativeSentence();
+                    }
+                }, 400);
+            }
+        });
+    }
+
+    private void playAudioFile(final File file, final int token, final int index) {
+        mainHandler.post(() -> {
+            if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
+            try {
+                if (onlinePlayer != null) {
+                    try {
+                        onlinePlayer.reset();
+                    } catch (Throwable ignored) {}
+                } else {
+                    onlinePlayer = new MediaPlayer();
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    AudioAttributes aa = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build();
+                    onlinePlayer.setAudioAttributes(aa);
+                } else {
+                    onlinePlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+                }
+
+                onlinePlayer.setDataSource(file.getAbsolutePath());
+
+                onlinePlayer.setOnCompletionListener(mp -> {
+                    mainHandler.post(() -> {
+                        if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
+                        cancelTtsWatchdog();
+                        nativeSentenceIndex++;
+                        playCurrentNativeSentence();
+                    });
+                });
+
+                onlinePlayer.setOnErrorListener((mp, what, extra) -> {
+                    mainHandler.post(() -> {
+                        if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
+                        cancelTtsWatchdog();
+                        nativeSentenceIndex++;
+                        playCurrentNativeSentence();
+                    });
+                    return true;
+                });
+
+                onlinePlayer.prepare();
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    try {
+                        float targetSpeed = 1.0f;
+                        if (selectedVoiceName.startsWith("google")) {
+                            targetSpeed = Math.max(0.5f, Math.min(3.0f, nativeRate));
+                        } else if (nativeRate > 2.0f) {
+                            targetSpeed = nativeRate / 2.0f;
+                        }
+                        if (Math.abs(targetSpeed - 1.0f) > 0.02f) {
+                            PlaybackParams params = onlinePlayer.getPlaybackParams();
+                            params.setSpeed(targetSpeed);
+                            onlinePlayer.setPlaybackParams(params);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+
+                onlinePlayer.start();
+
+                int duration = onlinePlayer.getDuration();
+                long timeoutMs = duration > 0 ? (duration + 6000L) : 15000L;
+                scheduleTtsWatchdog(index, timeoutMs);
+
+                prefetchOnlineSentence(index + 1);
+                prefetchOnlineSentence(index + 2);
+
+            } catch (Throwable t) {
+                t.printStackTrace();
+                mainHandler.postDelayed(() -> {
+                    if (token == currentOnlineSentenceToken && isNativeTtsMode && sIsPlaying) {
+                        nativeSentenceIndex++;
+                        playCurrentNativeSentence();
+                    }
+                }, 350);
+            }
+        });
+    }
+
     private void playCurrentNativeSentence() {
         cancelTtsWatchdog();
         if (!isNativeTtsMode || !sIsPlaying) return;
+
+        if (isOnlineVoice(selectedVoiceName)) {
+            playCurrentOnlineSentence();
+            return;
+        }
+
         if (nativeTts == null || !isNativeTtsReady) {
             initNativeTts();
             return;
@@ -1084,6 +1416,13 @@ public class MediaPlaybackService extends Service {
         pausedBySystem = bySystem;
         cancelTtsWatchdog();
         stopSilentNativeAudio();
+        if (onlinePlayer != null) {
+            try {
+                if (onlinePlayer.isPlaying()) {
+                    onlinePlayer.pause();
+                }
+            } catch (Throwable ignored) {}
+        }
         if (nativeTts != null) {
             try {
                 nativeTts.stop();
@@ -1100,6 +1439,16 @@ public class MediaPlaybackService extends Service {
         startSilentNativeAudio();
         acquireLocks();
         sIsPlaying = true;
+        if (isOnlineVoice(selectedVoiceName)) {
+            if (onlinePlayer != null) {
+                try {
+                    onlinePlayer.start();
+                    renderNotificationAndForeground(true, lastCoverUrl);
+                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeStateChange && window.ttsEngine.onNativeStateChange('playing')");
+                    return;
+                } catch (Throwable ignored) {}
+            }
+        }
         playCurrentNativeSentence();
         MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeStateChange && window.ttsEngine.onNativeStateChange('playing')");
     }
@@ -1108,8 +1457,16 @@ public class MediaPlaybackService extends Service {
         cancelGracefulTeardown();
         isNativeTtsMode = false;
         sIsPlaying = false;
+        currentOnlineSentenceToken++;
         stopSilentNativeAudio();
         cancelTtsWatchdog();
+        if (onlinePlayer != null) {
+            try {
+                onlinePlayer.reset();
+                onlinePlayer.release();
+            } catch (Throwable ignored) {}
+            onlinePlayer = null;
+        }
         if (nativeTts != null) {
             try {
                 nativeTts.stop();
@@ -1123,6 +1480,12 @@ public class MediaPlaybackService extends Service {
     public void jumpToNativeSentence(int index) {
         if (!isNativeTtsMode || nativeSentences.isEmpty()) return;
         cancelTtsWatchdog();
+        currentOnlineSentenceToken++;
+        if (onlinePlayer != null) {
+            try {
+                onlinePlayer.reset();
+            } catch (Throwable ignored) {}
+        }
         nativeSentenceIndex = Math.max(0, Math.min(index, nativeSentences.size() - 1));
         if (sIsPlaying) {
             playCurrentNativeSentence();
@@ -1142,6 +1505,9 @@ public class MediaPlaybackService extends Service {
     }
 
     public boolean isNativeTtsReady() {
+        if (isOnlineVoice(selectedVoiceName)) {
+            return true;
+        }
         return isNativeTtsReady && nativeTts != null;
     }
 
@@ -1556,6 +1922,14 @@ public class MediaPlaybackService extends Service {
         sIsPlaying = false;
         isNativeTtsMode = false;
         isForegroundRunning = false;
+        currentOnlineSentenceToken++;
+        if (onlinePlayer != null) {
+            try {
+                onlinePlayer.reset();
+                onlinePlayer.release();
+            } catch (Throwable ignored) {}
+            onlinePlayer = null;
+        }
         stopSilentNativeAudio();
         cancelTtsWatchdog();
         releaseLocks();
@@ -1608,6 +1982,18 @@ public class MediaPlaybackService extends Service {
         sIsPlaying = false;
         isNativeTtsMode = false;
         isForegroundRunning = false;
+        currentOnlineSentenceToken++;
+        if (onlinePlayer != null) {
+            try {
+                onlinePlayer.reset();
+                onlinePlayer.release();
+            } catch (Throwable ignored) {}
+            onlinePlayer = null;
+        }
+        try {
+            onlineTtsExecutor.shutdownNow();
+            prefetchExecutor.shutdownNow();
+        } catch (Throwable ignored) {}
         stopSilentNativeAudio();
         cancelTtsWatchdog();
         releaseLocks();

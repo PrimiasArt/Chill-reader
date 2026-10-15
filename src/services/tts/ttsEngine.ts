@@ -462,8 +462,25 @@ class TTSEngine {
           }
           this.synth.cancel();
         }
+
+        const androidMedia = (window as any).AndroidMedia;
+        if (androidMedia && typeof androidMedia.startNativeChapterPlayback === 'function') {
+          const processedSentences = this.sentences.map(s => pronunciationService.applyRules(s));
+          androidMedia.startNativeChapterPlayback(
+            this.currentChapterTitle || 'Đang nghe truyện',
+            this.currentBookTitle || 'Chill Reader',
+            this.currentAuthor || '',
+            this.currentCoverUrl || '',
+            JSON.stringify(processedSentences),
+            this.currentSentenceIndex,
+            this.settings.rate || 1.0,
+            this.settings.pitch || 1.0,
+            this.settings.voiceURI || ''
+          );
+          return;
+        }
+
         if (this.isNativeVoice()) {
-          const androidMedia = (window as any).AndroidMedia;
           if (androidMedia && typeof androidMedia.stopNative === 'function') {
             androidMedia.stopNative();
           }
@@ -567,7 +584,10 @@ class TTSEngine {
       }
     } catch {}
 
-    if (this.isNativeVoice()) {
+    const androidMedia = (window as any).AndroidMedia;
+    const hasNativeBridge = Boolean(androidMedia && typeof androidMedia.startNativeChapterPlayback === 'function');
+
+    if (hasNativeBridge || this.isNativeVoice()) {
       this.stopBackgroundAudioContext();
       this.silentAudio?.pause();
     } else {
@@ -576,15 +596,10 @@ class TTSEngine {
     }
 
     if (this.state === 'paused') {
-      if (this.isOnlineVoice() && this.activePlayer && this.activePlayer.src) {
+      if (hasNativeBridge && typeof androidMedia.resumeNative === 'function') {
+        androidMedia.resumeNative();
+      } else if (this.isOnlineVoice() && this.activePlayer && this.activePlayer.src) {
         this.activePlayer.play().catch(() => {});
-      } else if (this.isNativeVoice()) {
-        const androidMedia = (window as any).AndroidMedia;
-        if (androidMedia && typeof androidMedia.resumeNative === 'function') {
-          androidMedia.resumeNative();
-        } else {
-          this.speakCurrentSentence();
-        }
       } else if (this.synth) {
         this.synth.resume();
       }
@@ -597,24 +612,21 @@ class TTSEngine {
       ambientAudioService.setSound(ambientAudioService.getType());
     }
 
-    if (this.isNativeVoice()) {
-      const androidMedia = (window as any).AndroidMedia;
-      if (androidMedia && typeof androidMedia.startNativeChapterPlayback === 'function') {
-        const processedSentences = this.sentences.map(s => pronunciationService.applyRules(s));
-        androidMedia.startNativeChapterPlayback(
-          this.currentChapterTitle || 'Đang nghe truyện',
-          this.currentBookTitle || 'Chill Reader',
-          this.currentAuthor || '',
-          this.currentCoverUrl || '',
-          JSON.stringify(processedSentences),
-          this.currentSentenceIndex,
-          this.settings.rate || 1.0,
-          this.settings.pitch || 1.0,
-          this.settings.voiceURI || ''
-        );
-        this.notifyState('playing');
-        return;
-      }
+    if (hasNativeBridge) {
+      const processedSentences = this.sentences.map(s => pronunciationService.applyRules(s));
+      androidMedia.startNativeChapterPlayback(
+        this.currentChapterTitle || 'Đang nghe truyện',
+        this.currentBookTitle || 'Chill Reader',
+        this.currentAuthor || '',
+        this.currentCoverUrl || '',
+        JSON.stringify(processedSentences),
+        this.currentSentenceIndex,
+        this.settings.rate || 1.0,
+        this.settings.pitch || 1.0,
+        this.settings.voiceURI || ''
+      );
+      this.notifyState('playing');
+      return;
     }
 
     this.notifyState('playing');
@@ -624,16 +636,12 @@ class TTSEngine {
   public pause() {
     this.playbackToken++; // Invalidate pending async transitions
     this.stopBackgroundAudioContext();
-    if (this.isOnlineVoice()) {
+    const androidMedia = (window as any).AndroidMedia;
+    if (androidMedia && typeof androidMedia.pauseNative === 'function') {
+      androidMedia.pauseNative();
+    } else if (this.isOnlineVoice()) {
       if (this.audioPlayers[0]) this.audioPlayers[0].pause();
       if (this.audioPlayers[1]) this.audioPlayers[1].pause();
-    } else if (this.isNativeVoice()) {
-      const androidMedia = (window as any).AndroidMedia;
-      if (androidMedia && typeof androidMedia.pauseNative === 'function') {
-        androidMedia.pauseNative();
-      } else if (androidMedia && typeof androidMedia.stopNative === 'function') {
-        androidMedia.stopNative();
-      }
     } else if (this.synth) {
       this.synth.pause();
     }
@@ -650,6 +658,11 @@ class TTSEngine {
       ambientAudioService.setSound('off');
     }
 
+    const androidMedia = (window as any).AndroidMedia;
+    if (androidMedia && typeof androidMedia.stopNative === 'function') {
+      androidMedia.stopNative();
+    }
+
     if (this.audioPlayers[0]) {
       this.audioPlayers[0].onended = null;
       this.audioPlayers[0].onerror = null;
@@ -661,12 +674,6 @@ class TTSEngine {
       this.audioPlayers[1].onerror = null;
       this.audioPlayers[1].pause();
       this.audioPlayers[1].src = '';
-    }
-    if (this.isNativeVoice()) {
-      const androidMedia = (window as any).AndroidMedia;
-      if (androidMedia && typeof androidMedia.stopNative === 'function') {
-        androidMedia.stopNative();
-      }
     }
     if (this.synth) {
       if (this.currentUtterance) {
@@ -694,11 +701,9 @@ class TTSEngine {
     this.playbackToken++;
     this.playerLoadedSentenceIndex = [-1, -1];
 
-    if (this.isNativeVoice()) {
-      const androidMedia = (window as any).AndroidMedia;
-      if (androidMedia && typeof androidMedia.jumpNativeSentence === 'function') {
-        androidMedia.jumpNativeSentence(index);
-      }
+    const androidMedia = (window as any).AndroidMedia;
+    if (androidMedia && typeof androidMedia.jumpNativeSentence === 'function') {
+      androidMedia.jumpNativeSentence(index);
       this.currentSentenceIndex = index;
       this.notifySentence(index, this.sentences[index]);
       return;
@@ -1200,14 +1205,12 @@ class TTSEngine {
   }
 
   public syncNativePlaybackIndex() {
-    if (this.isNativeVoice() && this.state === 'playing') {
-      const androidMedia = (window as any).AndroidMedia;
-      if (androidMedia && typeof androidMedia.getNativePlaybackIndex === 'function') {
-        const idx = androidMedia.getNativePlaybackIndex();
-        if (typeof idx === 'number' && idx >= 0 && idx < this.sentences.length) {
-          this.currentSentenceIndex = idx;
-          this.notifySentence(idx, this.sentences[idx]);
-        }
+    const androidMedia = (window as any).AndroidMedia;
+    if (androidMedia && typeof androidMedia.getNativePlaybackIndex === 'function' && this.state === 'playing') {
+      const idx = androidMedia.getNativePlaybackIndex();
+      if (typeof idx === 'number' && idx >= 0 && idx < this.sentences.length) {
+        this.currentSentenceIndex = idx;
+        this.notifySentence(idx, this.sentences[idx]);
       }
     }
   }
@@ -1411,7 +1414,7 @@ class TTSEngine {
    * Communicates with MainActivity.java via JavascriptInterface 'AndroidMedia'
    */
   private updateNativeNotification(isPlaying: boolean) {
-    if (this.isNativeVoice()) return;
+    if (Boolean((window as any).AndroidMedia)) return; // Native MediaPlaybackService handles its own notification natively
     if (this.state === 'idle' && !isPlaying) return;
     try {
       const androidMedia = (window as any).AndroidMedia;

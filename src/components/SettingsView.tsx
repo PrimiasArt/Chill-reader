@@ -1102,23 +1102,39 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
           </p>
 
           {typeof window !== 'undefined' && Boolean((window as any).AndroidMedia) && (
-            <div className="pt-2 border-t border-zinc-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="pt-2 border-t border-zinc-800/80 space-y-3">
               <div className="text-xs text-zinc-300">
-                <span className="font-medium text-amber-300">Mẹo cho Android (Xiaomi / Samsung / Oppo):</span>
-                <p className="text-zinc-400 mt-0.5">Cho phép ứng dụng chạy nền không hạn chế để hệ điều hành không tự ý đóng app khi màn hình tắt lâu.</p>
+                <span className="font-semibold text-amber-300">Cấu hình chạy nền khi tắt màn hình (Fix tắt app trên Tecno / Xiaomi / Samsung):</span>
+                <p className="text-zinc-400 mt-1 leading-relaxed">
+                  Trên một số dòng máy như <strong>TECNO (HiOS / Power Marathon)</strong>, <strong>Xiaomi (MIUI/HyperOS)</strong> hoặc <strong>Samsung</strong>, hệ điều hành thường tự động đóng ứng dụng khi màn hình tắt lâu. Bạn hãy cấp quyền <em>Không hạn chế</em> theo 2 bước:
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const androidMedia = (window as any).AndroidMedia;
-                  if (androidMedia && typeof androidMedia.requestBatteryOptimizationExemption === 'function') {
-                    androidMedia.requestBatteryOptimizationExemption();
-                  }
-                }}
-                className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shadow-xs"
-              >
-                Mở cài đặt Tối ưu pin
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const androidMedia = (window as any).AndroidMedia;
+                    if (androidMedia && typeof androidMedia.requestBatteryOptimizationExemption === 'function') {
+                      androidMedia.requestBatteryOptimizationExemption();
+                    }
+                  }}
+                  className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-xs"
+                >
+                  1. Bỏ qua Tối ưu pin (Doze Mode)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const androidMedia = (window as any).AndroidMedia;
+                    if (androidMedia && typeof androidMedia.openAppBatterySettings === 'function') {
+                      androidMedia.openAppBatterySettings();
+                    }
+                  }}
+                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+                >
+                  2. Cài đặt Pin ứng dụng (Không hạn chế)
+                </button>
+              </div>
             </div>
           )}
         </div>
