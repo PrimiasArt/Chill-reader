@@ -27,6 +27,7 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -103,8 +104,15 @@ public class MediaPlaybackService extends Service {
     private volatile boolean playAlongOtherApps = true;
     private volatile boolean pausedBySystem = false;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private HandlerThread playbackThread = null;
+    private Handler playbackHandler = null;
+    private int nativeConsecutiveErrors = 0;
     private Runnable ttsWatchdogRunnable = null;
     private boolean isForegroundRunning = false;
+
+    private Handler getPlaybackHandler() {
+        return playbackHandler != null ? playbackHandler : mainHandler;
+    }
 
     private NotificationManager notificationManager;
     private MediaSessionCompat mediaSession;
@@ -287,6 +295,14 @@ public class MediaPlaybackService extends Service {
             int bufferSize = (minBufferSize > 0) ? Math.max(minBufferSize, sampleRate * 2) : sampleRate * 2;
             byte[] silentData = new byte[bufferSize];
 
+            // Fill with microscopic inaudible dither (+1, -1 16-bit PCM)
+            // This prevents MediaTek / HiOS DSP silence detection from powering down the DAC bus on screen timeout
+            for (int i = 0; i < bufferSize - 1; i += 2) {
+                short sample = (short) ((i % 4 == 0) ? 1 : -1);
+                silentData[i] = (byte) (sample & 0xFF);
+                silentData[i + 1] = (byte) ((sample >> 8) & 0xFF);
+            }
+
             AudioAttributes attributes = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -311,7 +327,7 @@ public class MediaPlaybackService extends Service {
                 int frameCount = bufferSize / 2;
                 silentAudioTrack.setLoopPoints(0, frameCount, -1);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    silentAudioTrack.setVolume(0.0001f);
+                    silentAudioTrack.setVolume(0.001f);
                 }
                 silentAudioTrack.play();
             } else {
@@ -441,6 +457,14 @@ public class MediaPlaybackService extends Service {
     public void onCreate() {
         super.onCreate();
         sInstance = this;
+
+        try {
+            playbackThread = new HandlerThread("ChillReaderPlayback", android.os.Process.THREAD_PRIORITY_AUDIO);
+            playbackThread.start();
+            playbackHandler = new Handler(playbackThread.getLooper());
+        } catch (Throwable t) {
+            playbackHandler = new Handler(Looper.getMainLooper());
+        }
 
         final Thread.UncaughtExceptionHandler serviceDefaultHandler = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
@@ -807,9 +831,38 @@ public class MediaPlaybackService extends Service {
         return isCallActive();
     }
 
+    public TextToSpeech getNativeTtsInstance() {
+        return nativeTts;
+    }
+
+    public static String findBestTtsEngine(Context context) {
+        if (context == null) return null;
+        try {
+            android.content.pm.PackageManager pm = context.getPackageManager();
+            Intent intent = new Intent("android.intent.action.TTS_SERVICE");
+            List<android.content.pm.ResolveInfo> resolveInfos = pm.queryIntentServices(intent, 0);
+            if (resolveInfos != null && !resolveInfos.isEmpty()) {
+                // Priority 1: Google Speech Services (best Vietnamese TTS voice pack support)
+                for (android.content.pm.ResolveInfo ri : resolveInfos) {
+                    if (ri.serviceInfo != null && "com.google.android.tts".equalsIgnoreCase(ri.serviceInfo.packageName)) {
+                        return "com.google.android.tts";
+                    }
+                }
+                // Priority 2: Samsung TTS
+                for (android.content.pm.ResolveInfo ri : resolveInfos) {
+                    if (ri.serviceInfo != null && "com.samsung.SMT".equalsIgnoreCase(ri.serviceInfo.packageName)) {
+                        return "com.samsung.SMT";
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
     private boolean isOnlineVoice(String voice) {
-        if (voice == null || voice.trim().isEmpty()) return true; // Default voice is Edge TTS!
-        return !voice.startsWith("native:") && !"android".equalsIgnoreCase(voice);
+        if (voice == null || voice.trim().isEmpty()) return false;
+        String lower = voice.toLowerCase(Locale.US).trim();
+        return lower.startsWith("edge:") || lower.startsWith("google:");
     }
 
     private void applySelectedVoice() {
@@ -848,7 +901,8 @@ public class MediaPlaybackService extends Service {
     private void initNativeTts() {
         if (nativeTts != null) return;
         try {
-            nativeTts = new TextToSpeech(getApplicationContext(), status -> {
+            String bestEngine = findBestTtsEngine(getApplicationContext());
+            TextToSpeech.OnInitListener initListener = status -> {
                 if (status == TextToSpeech.SUCCESS) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         try {
@@ -869,14 +923,14 @@ public class MediaPlaybackService extends Service {
                             if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
                                 return;
                             }
-                            mainHandler.post(() -> {
+                            getPlaybackHandler().post(() -> {
                                 MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
                             });
                         }
 
                         @Override
                         public void onDone(String utteranceId) {
-                            mainHandler.post(() -> {
+                            getPlaybackHandler().post(() -> {
                                 if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
                                     // Ignore stale callback from older utterance, DO NOT cancel current watchdog!
                                     return;
@@ -890,7 +944,7 @@ public class MediaPlaybackService extends Service {
 
                         @Override
                         public void onError(String utteranceId) {
-                            mainHandler.post(() -> {
+                            getPlaybackHandler().post(() -> {
                                 if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
                                     return;
                                 }
@@ -903,7 +957,7 @@ public class MediaPlaybackService extends Service {
 
                         @Override
                         public void onStop(String utteranceId, boolean interrupted) {
-                            mainHandler.post(() -> {
+                            getPlaybackHandler().post(() -> {
                                 if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
                                     return; // Stale stop event from previously flushed utterance: ignore!
                                 }
@@ -911,7 +965,7 @@ public class MediaPlaybackService extends Service {
                                 if (!isNativeTtsMode || !sIsPlaying || pausedBySystem) return;
 
                                 // Interrupted mid-sentence by transient system event: advance cleanly to next sentence
-                                mainHandler.postDelayed(() -> {
+                                getPlaybackHandler().postDelayed(() -> {
                                     if (isNativeTtsMode && sIsPlaying && !pausedBySystem) {
                                         nativeSentenceIndex++;
                                         playCurrentNativeSentence();
@@ -922,12 +976,18 @@ public class MediaPlaybackService extends Service {
                     });
 
                     if (isNativeTtsMode && sIsPlaying) {
-                        playCurrentNativeSentence();
+                        getPlaybackHandler().post(() -> playCurrentNativeSentence());
                     }
                 } else {
                     isNativeTtsReady = false;
                 }
-            });
+            };
+
+            if (bestEngine != null) {
+                nativeTts = new TextToSpeech(getApplicationContext(), initListener, bestEngine);
+            } else {
+                nativeTts = new TextToSpeech(getApplicationContext(), initListener);
+            }
         } catch (Throwable t) {
             t.printStackTrace();
             isNativeTtsReady = false;
@@ -953,6 +1013,7 @@ public class MediaPlaybackService extends Service {
             lastCoverUrl = coverUrl;
 
             requestAudioFocus();
+            startSilentNativeAudio();
             acquireLocks();
 
             if (isOnlineVoice(selectedVoiceName)) {
@@ -1356,23 +1417,40 @@ public class MediaPlaybackService extends Service {
             }
 
             if (result != TextToSpeech.SUCCESS) {
-                mainHandler.postDelayed(() -> {
+                nativeConsecutiveErrors++;
+                if (nativeConsecutiveErrors >= 5) {
+                    sIsPlaying = false;
+                    cancelTtsWatchdog();
+                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeError && window.ttsEngine.onNativeError('TTS_NOT_SUPPORTED')");
+                    renderNotificationAndForeground(false, lastCoverUrl);
+                    return;
+                }
+                getPlaybackHandler().postDelayed(() -> {
                     if (isNativeTtsMode && sIsPlaying) {
                         nativeSentenceIndex++;
                         playCurrentNativeSentence();
                     }
-                }, 200);
+                }, 350);
             } else {
+                nativeConsecutiveErrors = 0;
                 scheduleTtsWatchdog(nativeSentenceIndex, watchdogTimeoutMs);
             }
         } catch (Throwable t) {
             t.printStackTrace();
-            mainHandler.postDelayed(() -> {
+            nativeConsecutiveErrors++;
+            if (nativeConsecutiveErrors >= 5) {
+                sIsPlaying = false;
+                cancelTtsWatchdog();
+                MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeError && window.ttsEngine.onNativeError('TTS_NOT_SUPPORTED')");
+                renderNotificationAndForeground(false, lastCoverUrl);
+                return;
+            }
+            getPlaybackHandler().postDelayed(() -> {
                 if (isNativeTtsMode && sIsPlaying) {
                     nativeSentenceIndex++;
                     playCurrentNativeSentence();
                 }
-            }, 200);
+            }, 350);
         }
 
         MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
@@ -1387,11 +1465,12 @@ public class MediaPlaybackService extends Service {
                 playCurrentNativeSentence();
             }
         };
-        mainHandler.postDelayed(ttsWatchdogRunnable, timeoutMs);
+        getPlaybackHandler().postDelayed(ttsWatchdogRunnable, timeoutMs);
     }
 
     private void cancelTtsWatchdog() {
         if (ttsWatchdogRunnable != null) {
+            getPlaybackHandler().removeCallbacks(ttsWatchdogRunnable);
             mainHandler.removeCallbacks(ttsWatchdogRunnable);
             ttsWatchdogRunnable = null;
         }
@@ -1523,6 +1602,23 @@ public class MediaPlaybackService extends Service {
                     switch (focusChange) {
                         case AudioManager.AUDIOFOCUS_LOSS:
                             boolean callActivePermanent = isHighPriorityAudioActive();
+                            if (callActivePermanent) {
+                                if (sIsPlaying) {
+                                    if (isNativeTtsMode) {
+                                        pauseNativeTts(true);
+                                    } else {
+                                        pausedBySystem = true;
+                                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
+                                    }
+                                }
+                                break;
+                            }
+
+                            if (playAlongOtherApps) {
+                                // Concurrent playback enabled: ignore focus changes from system lock sounds, keyboards, or other media
+                                break;
+                            }
+
                             boolean isInteractive = true;
                             boolean isLocked = false;
                             try {
@@ -1539,19 +1635,17 @@ public class MediaPlaybackService extends Service {
                             } catch (Throwable ignored) {}
 
                             // If screen is OFF or locked, audio focus loss is caused by keyguard/lockscreen transition, NOT a call.
-                            // Never pause when screen is off or keyguard is locked unless there is an actual incoming/active phone call!
-                            if ((!isInteractive || isLocked) && !callActivePermanent) {
+                            // Never pause when screen is off or keyguard is locked!
+                            if (!isInteractive || isLocked) {
                                 break;
                             }
 
-                            if (callActivePermanent || !playAlongOtherApps) {
-                                if (sIsPlaying) {
-                                    if (isNativeTtsMode) {
-                                        pauseNativeTts(true);
-                                    } else {
-                                        pausedBySystem = true;
-                                        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
-                                    }
+                            if (sIsPlaying) {
+                                if (isNativeTtsMode) {
+                                    pauseNativeTts(true);
+                                } else {
+                                    pausedBySystem = true;
+                                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.pause()");
                                 }
                             }
                             break;
@@ -2030,5 +2124,11 @@ public class MediaPlaybackService extends Service {
             mediaSession = null;
         }
         imageExecutor.shutdown();
+
+        if (playbackThread != null) {
+            playbackThread.quitSafely();
+            playbackThread = null;
+            playbackHandler = null;
+        }
     }
 }

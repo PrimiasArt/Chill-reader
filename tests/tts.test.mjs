@@ -134,3 +134,27 @@ test('Pronunciation - Preserves words containing substrings of abbreviations', (
   assert.ok(processed.includes('Koi'));
   assert.ok(!processed.includes('khôngi'));
 });
+
+// Voice classification tests
+function isOnlineVoice(voiceURI) {
+  if (!voiceURI) return false;
+  const lower = voiceURI.toLowerCase().trim();
+  return lower.startsWith('edge:') || lower.startsWith('google:');
+}
+
+test('Voice Classification - Strictly identifies online vs offline voices', () => {
+  // Online voices
+  assert.equal(isOnlineVoice('edge:vi-VN-NamMinhNeural'), true);
+  assert.equal(isOnlineVoice('edge:vi-VN-HoaiMyNeural'), true);
+  assert.equal(isOnlineVoice('google:vi'), true);
+
+  // Offline / Native voices MUST NEVER be classified as online
+  assert.equal(isOnlineVoice('native:android'), false);
+  assert.equal(isOnlineVoice('native:vi-vn-x-vic-local'), false);
+  assert.equal(isOnlineVoice('vi-vn-x-vic-network'), false);
+  assert.equal(isOnlineVoice('vi-VN-language'), false);
+  assert.equal(isOnlineVoice('Google Tiếng Việt'), false);
+  assert.equal(isOnlineVoice(''), false);
+  assert.equal(isOnlineVoice(null), false);
+  assert.equal(isOnlineVoice(undefined), false);
+});

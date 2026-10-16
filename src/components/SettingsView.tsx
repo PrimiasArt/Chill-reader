@@ -23,7 +23,8 @@ import {
   SpellCheck,
   CloudRain,
   Plus,
-  Lock
+  Lock,
+  Settings
 } from 'lucide-react';
 import { db } from '../services/db';
 import { supabaseSync, type SupabaseConfig } from '../services/sync/supabaseSync';
@@ -71,6 +72,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // TTS Voice state
   const [testingVoiceId, setTestingVoiceId] = useState<string | null>(null);
   const [voices, setVoices] = useState<VoiceOption[]>([]);
+  const [ttsStatus, setTtsStatus] = useState<string>('unknown');
+  const [ttsEngineName, setTtsEngineName] = useState<string>('');
 
   // Pronunciation Dictionary state
   const [pronRules, setPronRules] = useState<PronunciationRule[]>([]);
@@ -124,10 +127,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setPronRules(rules);
     });
 
-    setVoices(ttsEngine.getAllAvailableVoices());
+    const checkNativeTts = () => {
+      try {
+        const androidMedia = (window as any).AndroidMedia;
+        if (androidMedia && typeof androidMedia.checkVietnameseTtsStatus === 'function') {
+          const raw = androidMedia.checkVietnameseTtsStatus();
+          const info = JSON.parse(raw);
+          if (info) {
+            if (info.status) setTtsStatus(info.status);
+            if (info.engine) setTtsEngineName(info.engine);
+          }
+        }
+      } catch {}
+      setVoices(ttsEngine.getAllAvailableVoices());
+    };
+
+    checkNativeTts();
+    const t1 = setTimeout(checkNativeTts, 600);
+    const t2 = setTimeout(checkNativeTts, 1800);
+
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.onvoiceschanged = () => {
-        setVoices(ttsEngine.getAllAvailableVoices());
+        checkNativeTts();
       };
     }
 
@@ -137,6 +158,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     return () => {
       unsubUpdater();
+      clearTimeout(t1);
+      clearTimeout(t2);
     };
   }, []);
 
@@ -873,6 +896,44 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
             <p className="text-xs text-zinc-400 pt-3">
               Hỗ trợ giọng AI Neural truyền cảm tự nhiên, giọng Google và giọng có sẵn trên thiết bị
             </p>
+
+        {/* Native Android TTS Engine info & Settings shortcut */}
+        {typeof window !== 'undefined' && Boolean((window as any).AndroidMedia) && (
+          <div className="p-3 bg-zinc-800/60 border border-zinc-700/60 rounded-xl space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xs font-semibold text-zinc-300 shrink-0">Bộ đọc của máy:</span>
+                <span className="text-[11px] font-mono text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 truncate">
+                  {ttsEngineName ? ttsEngineName.replace('com.', '') : 'Google Speech Services'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    (window as any).AndroidMedia?.openTtsSettings?.();
+                  } catch {}
+                }}
+                className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                Cài đặt máy
+              </button>
+            </div>
+
+            {ttsStatus === 'missing_data' && (
+              <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-2 text-xs text-amber-300">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold">Điện thoại chưa tải gói giọng đọc Tiếng Việt offline</p>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">
+                    Chạm vào "Cài đặt máy" ở trên &rarr; Cài đặt dữ liệu giọng nói &rarr; Tải gói Tiếng Việt để nghe offline khi không có mạng.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Voice Selector with preview */}
         <div className="space-y-3">

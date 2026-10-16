@@ -287,9 +287,9 @@ class TTSEngine {
 
   public isOnlineVoice(voiceURI?: string): boolean {
     const v = voiceURI !== undefined ? voiceURI : this.settings.voiceURI;
-    if (!v) return true;
-    if (v.startsWith('native:')) return false;
-    return v.startsWith('edge:') || v.startsWith('google:');
+    if (!v) return false;
+    const lower = v.toLowerCase().trim();
+    return lower.startsWith('edge:') || lower.startsWith('google:');
   }
 
   public isNativeVoice(voiceURI?: string): boolean {
@@ -329,21 +329,51 @@ class TTSEngine {
     if (isAndroid) {
       list.push({
         id: 'native:android',
-        name: 'Giọng máy Android (100% Offline)',
+        name: 'Giọng máy Android mặc định (100% Offline)',
         category: 'native',
         gender: 'neutral',
         badge: '100% Offline · Không mạng',
-        description: 'Giọng đọc gốc của điện thoại Android (Google/Samsung TTS), đọc mượt mà không cần mạng Internet',
+        description: 'Giọng đọc gốc của điện thoại Android (Google Speech Services), đọc mượt mà không cần mạng Internet',
         isOnline: false
       });
+
+      // Query native Android TTS voices directly from TextToSpeech
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.getNativeVoicesJson === 'function') {
+        try {
+          const raw = androidMedia.getNativeVoicesJson();
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            parsed.forEach((nv: any, idx: number) => {
+              const lower = (nv.name || '').toLowerCase();
+              const isMale = lower.includes('vic') || lower.includes('male') || lower.includes('nam') || lower.includes('vid');
+              const isOffline = !nv.requiresNetwork;
+              list.push({
+                id: nv.id || `native:${nv.name}`,
+                name: `Google Tiếng Việt (${isMale ? 'Nam' : 'Nữ'} #${idx + 1})`,
+                category: 'native',
+                gender: isMale ? 'male' : 'female',
+                badge: isOffline ? '100% Offline · Máy' : 'Thiết bị',
+                description: `Giọng đọc Android (${nv.name}) - Hoạt động ngoại tuyến không cần mạng`,
+                isOnline: false
+              });
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to parse native voices JSON:', e);
+        }
+      }
     }
 
     const browserVoices = this.getVietnameseVoices();
     browserVoices.forEach(bv => {
+      const rawId = bv.voiceURI || bv.name;
+      const voiceId = rawId.startsWith('native:') ? rawId : `native:${rawId}`;
+      if (list.some(item => item.id === voiceId || item.id === rawId)) return;
       const lower = bv.name.toLowerCase();
       const isMale = lower.includes('male') || lower.includes('nam') || lower.includes('an');
       list.push({
-        id: bv.voiceURI,
+        id: voiceId,
         name: bv.name,
         category: 'browser',
         gender: isMale ? 'male' : 'female',
@@ -403,7 +433,8 @@ class TTSEngine {
       this.currentUtterance = utterance;
       utterance.rate = this.settings.rate;
       utterance.pitch = this.settings.pitch;
-      const voice = this.getVoices().find(v => v.voiceURI === voiceURI);
+      const rawVoiceId = voiceURI.startsWith('native:') ? voiceURI.substring(7) : voiceURI;
+      const voice = this.getVoices().find(v => v.voiceURI === voiceURI || v.voiceURI === rawVoiceId);
       if (voice) utterance.voice = voice;
       this.synth.speak(utterance);
     }

@@ -27,7 +27,11 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import android.speech.tts.Voice;
 import java.util.Locale;
+import java.util.Set;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
     private static volatile MainActivity sInstance = null;
@@ -169,7 +173,8 @@ public class MainActivity extends BridgeActivity {
 
     private void initNativeTts() {
         try {
-            nativeTts = new TextToSpeech(getApplicationContext(), status -> {
+            String bestEngine = MediaPlaybackService.findBestTtsEngine(getApplicationContext());
+            TextToSpeech.OnInitListener initListener = status -> {
                 if (status == TextToSpeech.SUCCESS) {
                     try {
                         int result = nativeTts.setLanguage(new Locale("vi", "VN"));
@@ -198,7 +203,13 @@ public class MainActivity extends BridgeActivity {
                 } else {
                     isNativeTtsReady = false;
                 }
-            });
+            };
+
+            if (bestEngine != null) {
+                nativeTts = new TextToSpeech(getApplicationContext(), initListener, bestEngine);
+            } else {
+                nativeTts = new TextToSpeech(getApplicationContext(), initListener);
+            }
         } catch (Exception e) {
             e.printStackTrace();
             isNativeTtsReady = false;
@@ -212,6 +223,98 @@ public class MainActivity extends BridgeActivity {
                 return isNativeTtsReady && nativeTts != null;
             } catch (Throwable t) {
                 return false;
+            }
+        }
+
+        @JavascriptInterface
+        public String getNativeVoicesJson() {
+            try {
+                TextToSpeech tts = nativeTts;
+                if (tts == null) {
+                    MediaPlaybackService svc = MediaPlaybackService.getInstance();
+                    if (svc != null) {
+                        tts = svc.getNativeTtsInstance();
+                    }
+                }
+                if (tts != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    Set<Voice> voices = tts.getVoices();
+                    if (voices != null && !voices.isEmpty()) {
+                        JSONArray array = new JSONArray();
+                        for (Voice v : voices) {
+                            if (v == null || v.getLocale() == null) continue;
+                            String lang = v.getLocale().getLanguage();
+                            String langTag = v.getLocale().toLanguageTag();
+                            if ("vi".equalsIgnoreCase(lang) || (langTag != null && langTag.toLowerCase().startsWith("vi"))) {
+                                JSONObject obj = new JSONObject();
+                                obj.put("id", "native:" + v.getName());
+                                obj.put("name", v.getName());
+                                obj.put("lang", langTag != null ? langTag : "vi-VN");
+                                obj.put("requiresNetwork", v.isNetworkConnectionRequired());
+                                obj.put("quality", v.getQuality());
+                                array.put(obj);
+                            }
+                        }
+                        return array.toString();
+                    }
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+            return "[]";
+        }
+
+        @JavascriptInterface
+        public String checkVietnameseTtsStatus() {
+            JSONObject result = new JSONObject();
+            try {
+                TextToSpeech tts = nativeTts;
+                if (tts == null) {
+                    MediaPlaybackService svc = MediaPlaybackService.getInstance();
+                    if (svc != null) tts = svc.getNativeTtsInstance();
+                }
+                String currentEngine = "";
+                if (tts != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
+                    currentEngine = tts.getDefaultEngine();
+                }
+                result.put("engine", currentEngine != null ? currentEngine : "");
+
+                if (tts != null && isNativeTtsReady) {
+                    int status = tts.isLanguageAvailable(new Locale("vi", "VN"));
+                    if (status == TextToSpeech.LANG_AVAILABLE || status == TextToSpeech.LANG_COUNTRY_AVAILABLE || status == TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE) {
+                        result.put("status", "available");
+                    } else if (status == TextToSpeech.LANG_MISSING_DATA) {
+                        result.put("status", "missing_data");
+                    } else {
+                        result.put("status", "not_supported");
+                    }
+                } else {
+                    result.put("status", "not_ready");
+                }
+            } catch (Throwable t) {
+                try { result.put("status", "error"); } catch (Throwable ignored) {}
+            }
+            return result.toString();
+        }
+
+        @JavascriptInterface
+        public void openTtsSettings() {
+            try {
+                Intent intent = new Intent("com.android.settings.TTS_SETTINGS");
+                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            } catch (Throwable t1) {
+                try {
+                    Intent intent = new Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA);
+                    intent.setPackage("com.google.android.tts");
+                    intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                } catch (Throwable t2) {
+                    try {
+                        Intent intent = new Intent(Settings.ACTION_SETTINGS);
+                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(intent);
+                    } catch (Throwable ignored) {}
+                }
             }
         }
 
