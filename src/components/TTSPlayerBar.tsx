@@ -107,88 +107,118 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
 
   return (
     <>
-      {/* 1. Floating Mini Player Bar at Bottom (stacked above BottomNav on mobile) */}
+      {/* 1. Floating Mini Player Capsule (stacked above BottomNav on mobile) */}
       <div 
-        className={`fixed left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 text-zinc-100 shadow-2xl px-3 sm:px-4 py-2 transition-all ${
+        className={`fixed z-40 transition-all duration-300 ${
           isInsideReader 
-            ? 'bottom-0 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]' 
-            : 'bottom-16 pb-2'
+            ? 'left-3 right-3 max-w-xl mx-auto bottom-3' 
+            : 'left-3 right-3 max-w-xl mx-auto bottom-20 md:bottom-5'
         }`}
       >
-        <div className="max-w-4xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
-          {/* Story & Chapter Info */}
-          <div 
-            onClick={() => onSetOpenFullModal(true)}
-            className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer hover:opacity-90"
-          >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden bg-zinc-800 border border-zinc-700 shrink-0 flex items-center justify-center">
-              {coverUrl ? (
-                <img src={coverUrl} alt={bookTitle} className="w-full h-full object-cover" />
-              ) : (
-                <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
-              )}
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <h4 className="text-xs font-semibold text-zinc-100 truncate">
-                {chapterTitle}
-              </h4>
-              <p className="text-[11px] text-zinc-400 truncate">
-                {bookTitle} • <span className="text-amber-400 font-medium">{progressPercent}%</span>
-              </p>
-            </div>
+        <div className="glass-dock rounded-2xl border border-white/10 shadow-2xl px-3.5 py-2.5 relative overflow-hidden group">
+          {/* Hairline Progress Indicator at Top */}
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-zinc-800/80">
+            <div 
+              className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
 
-          {/* Quick Playback Controls */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* Rewind 1 sentence */}
-            <button
-              onClick={() => ttsEngine.previousSentence()}
-              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Tua lùi 1 câu"
-            >
-              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-
-            {/* Play/Pause */}
-            <button
-              onClick={() => ttsEngine.togglePlayPause()}
-              className="p-2 sm:p-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold transition-all shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
-              title={ttsState === 'playing' ? 'Tạm dừng' : 'Đọc tiếp'}
-            >
-              {ttsState === 'playing' ? (
-                <Pause className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current" />
-              ) : (
-                <Play className="w-4 h-4 sm:w-4.5 sm:h-4.5 fill-current translate-x-0.5" />
-              )}
-            </button>
-
-            {/* Forward 1 sentence */}
-            <button
-              onClick={() => ttsEngine.nextSentence()}
-              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Tua tiến 1 câu"
-            >
-              <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-
-            {/* Expand Full Player Modal */}
-            <button
+          <div className="flex items-center justify-between gap-3">
+            {/* Story & Chapter Info with Animated Wave */}
+            <div 
               onClick={() => onSetOpenFullModal(true)}
-              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer ml-1"
-              title="Mở rộng khung nghe"
+              className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer select-none"
             >
-              <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
+              <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-zinc-800 border border-zinc-700/80 shrink-0 flex items-center justify-center shadow-md">
+                {coverUrl ? (
+                  <img src={coverUrl} alt={bookTitle} className="w-full h-full object-cover" />
+                ) : (
+                  <Volume2 className="w-5 h-5 text-amber-400" />
+                )}
 
-            {/* Close Player */}
-            <button
-              onClick={onClosePlayer}
-              className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-              title="Tắt trình nghe"
-            >
-              <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
+                {/* Animated sound wave overlay when playing */}
+                {ttsState === 'playing' && (
+                  <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center gap-0.5">
+                    <span className="w-0.5 bg-amber-400 rounded-full audio-bar-1" />
+                    <span className="w-0.5 bg-amber-300 rounded-full audio-bar-2" />
+                    <span className="w-0.5 bg-amber-400 rounded-full audio-bar-3" />
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h4 className="text-xs font-bold text-zinc-100 truncate group-hover:text-amber-300 transition-colors">
+                  {chapterTitle}
+                </h4>
+                <div className="flex items-center gap-2 text-[11px] text-zinc-400 mt-0.5 truncate">
+                  <span className="truncate">{bookTitle}</span>
+                  <span className="text-zinc-600">•</span>
+                  <span className="text-amber-400 font-mono font-semibold shrink-0">{progressPercent}%</span>
+                  {countdownSeconds !== null && (
+                    <>
+                      <span className="text-zinc-600">•</span>
+                      <span className="text-zinc-400 text-[10px] flex items-center gap-0.5 shrink-0">
+                        <Timer className="w-2.5 h-2.5 text-amber-400" />
+                        {formatCountdown(countdownSeconds)}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Playback Controls */}
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+              {/* Rewind 1 sentence */}
+              <button
+                onClick={() => ttsEngine.previousSentence()}
+                className="p-2 rounded-xl hover:bg-white/10 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+                title="Tua lùi 1 câu"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+
+              {/* Play/Pause */}
+              <button
+                onClick={() => ttsEngine.togglePlayPause()}
+                className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-zinc-950 font-bold flex items-center justify-center transition-all shadow-lg shadow-amber-500/25 active:scale-95 cursor-pointer shrink-0"
+                title={ttsState === 'playing' ? 'Tạm dừng' : 'Đọc tiếp'}
+              >
+                {ttsState === 'playing' ? (
+                  <Pause className="w-4.5 h-4.5 fill-current" />
+                ) : (
+                  <Play className="w-4.5 h-4.5 fill-current translate-x-0.5" />
+                )}
+              </button>
+
+              {/* Forward 1 sentence */}
+              <button
+                onClick={() => ttsEngine.nextSentence()}
+                className="p-2 rounded-xl hover:bg-white/10 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+                title="Tua tiến 1 câu"
+              >
+                <RotateCw className="w-4 h-4" />
+              </button>
+
+              {/* Expand Full Player Modal */}
+              <button
+                onClick={() => onSetOpenFullModal(true)}
+                className="p-2 rounded-xl hover:bg-white/10 text-zinc-400 hover:text-zinc-100 transition-colors cursor-pointer"
+                title="Mở rộng khung nghe"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
+
+              {/* Close Player */}
+              <button
+                onClick={onClosePlayer}
+                className="p-2 rounded-xl hover:bg-white/10 text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                title="Tắt trình nghe"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

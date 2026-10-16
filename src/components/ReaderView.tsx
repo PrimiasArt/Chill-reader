@@ -25,7 +25,11 @@ import {
   Copy,
   Volume2,
   Flame,
-  Bot
+  Bot,
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward
 } from 'lucide-react';
 import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily, CrawlSearchResult } from '../types';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
@@ -95,6 +99,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [showAiCompanion, setShowAiCompanion] = useState(false);
   const [pageFlipDirection, setPageFlipDirection] = useState<'next' | 'prev'>('next');
   const [rulerY, setRulerY] = useState<number | null>(null);
+  const [scrollProgress, setScrollProgress] = useState(0);
 
   // Quick jump & TOC search states
   const [tocSearch, setTocSearch] = useState('');
@@ -635,6 +640,17 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    const handleScroll = () => {
+      const total = document.documentElement.scrollHeight - window.innerHeight;
+      if (total > 0) {
+        setScrollProgress(Math.min(100, Math.max(0, (window.scrollY / total) * 100)));
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   // Jump directly to a given chapter number
   const jumpToChapter = (chapterNum: number) => {
     const validNum = Math.max(1, Math.min(chapterNum, chapters.length));
@@ -679,11 +695,19 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   return (
     <div className={`min-h-screen transition-colors duration-200 ${getThemeClass(settings.theme)} flex flex-col`}>
+      {/* Razor-thin Scroll Progress Bar at very top */}
+      <div className="fixed top-0 left-0 right-0 h-[2.5px] z-50 pointer-events-none bg-black/10">
+        <div 
+          className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 transition-all duration-150"
+          style={{ width: `${scrollProgress}%` }}
+        />
+      </div>
+
       {/* Top Floating Control Bar */}
       <div 
         className={`fixed top-0 left-0 right-0 z-30 transition-transform duration-300 ${
           showControls ? 'translate-y-0' : '-translate-y-full'
-        } pt-[env(safe-area-inset-top,0px)] bg-zinc-900/95 backdrop-blur-md border-b border-zinc-800 text-zinc-100 shadow-md`}
+        } pt-[env(safe-area-inset-top,0px)] glass-panel border-b border-white/5 text-zinc-100 shadow-lg`}
       >
         <div className="max-w-4xl mx-auto px-3 sm:px-4 h-14 flex items-center justify-between gap-2">
           {/* Back & Chapter Info */}
@@ -1223,6 +1247,110 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           </div>
         </main>
       )}
+
+      {/* Floating Ergonomic Reading Dock (Apple Books / Kindle Style) */}
+      <div 
+        className={`fixed bottom-4 left-3 right-3 sm:left-auto sm:right-1/2 sm:translate-x-1/2 sm:w-[480px] z-30 transition-all duration-300 ${
+          showControls ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-24 opacity-0 pointer-events-none'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="glass-dock rounded-2xl p-2.5 border border-white/10 shadow-2xl flex flex-col gap-2">
+          {/* Chapter Scrubber / Range slider */}
+          <div className="flex items-center gap-2 px-2 text-[11px] text-zinc-400 select-none">
+            <span className="font-mono text-zinc-300 font-semibold shrink-0">Ch.{currentChapterNumber}</span>
+            <input 
+              type="range"
+              min={1}
+              max={Math.max(1, chapters.length)}
+              value={currentChapterNumber}
+              onChange={(e) => {
+                const num = parseInt(e.target.value, 10);
+                if (!isNaN(num) && num !== currentChapterNumber) {
+                  onSelectChapter(num);
+                }
+              }}
+              className="flex-1 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+            />
+            <span className="font-mono text-zinc-400 font-semibold shrink-0">{chapters.length} ch.</span>
+          </div>
+
+          {/* Quick Control Pills */}
+          <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-white/5">
+            <button
+              disabled={currentChapterNumber <= 1}
+              onClick={() => handleChapterChange(currentChapterNumber - 1)}
+              className="p-2 rounded-xl text-zinc-300 hover:text-white hover:bg-white/10 disabled:opacity-25 transition-all cursor-pointer"
+              title="Chương trước"
+            >
+              <SkipBack className="w-4 h-4" />
+            </button>
+
+            <button
+              disabled={chapters.length === 0}
+              onClick={() => setShowTocDrawer(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-medium transition-all cursor-pointer"
+              title="Mục lục chương"
+            >
+              <List className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Mục lục</span>
+            </button>
+
+            {/* Audio Toggle Pill */}
+            {!isComicChapter && (
+              <button
+                onClick={() => {
+                  if (ttsState === 'idle') onStartTTS();
+                  else onToggleTTS();
+                }}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer ${
+                  ttsState === 'playing'
+                    ? 'bg-amber-500 text-zinc-950 shadow-amber-500/25'
+                    : 'bg-zinc-800/90 hover:bg-zinc-700 text-amber-300 border border-amber-500/20'
+                }`}
+              >
+                {ttsState === 'playing' ? (
+                  <>
+                    <Pause className="w-3.5 h-3.5 fill-current" />
+                    <span>Tạm dừng</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-current translate-x-0.5" />
+                    <span>Nghe audio</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowAiCompanion(true)}
+              className="p-2 rounded-xl hover:bg-purple-500/20 text-purple-400 hover:text-purple-300 transition-all cursor-pointer"
+              title="Trợ lý AI đồng hành (Chống spoil)"
+            >
+              <Bot className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-medium transition-all cursor-pointer"
+              title="Cài đặt cỡ chữ, font, màu nền"
+            >
+              <Type className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Giao diện</span>
+            </button>
+
+            <button
+              disabled={currentChapterNumber >= chapters.length}
+              onClick={() => handleChapterChange(currentChapterNumber + 1)}
+              className="p-2 rounded-xl text-zinc-300 hover:text-white hover:bg-white/10 disabled:opacity-25 transition-all cursor-pointer"
+              title="Chương sau"
+            >
+              <SkipForward className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Reader Settings Modal */}
       {showSettingsModal && (

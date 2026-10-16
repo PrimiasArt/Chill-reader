@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   BookOpen, 
   Headphones, 
@@ -20,7 +20,8 @@ import {
   CheckCircle2,
   X,
   Loader2,
-  Bookmark
+  Bookmark,
+  ArrowUpDown
 } from 'lucide-react';
 import { supabaseSync } from '../services/sync/supabaseSync';
 import { readingStatsService } from '../services/stats/readingStatsService';
@@ -40,6 +41,7 @@ interface LibraryViewProps {
 }
 
 type FilterCategory = 'all' | 'reading' | 'favorites' | 'comics' | 'finished';
+type SortOption = 'recent' | 'title' | 'progress' | 'chapters';
 
 export const LibraryView: React.FC<LibraryViewProps> = ({
   stories,
@@ -53,6 +55,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<FilterCategory>('all');
+  const [sortOption, setSortOption] = useState<SortOption>('recent');
   const [viewMode, setViewMode] = useState<'grid' | 'bookshelf'>('grid');
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showVaultModal, setShowVaultModal] = useState(false);
@@ -112,19 +115,42 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     }
   };
 
-  const filteredStories = stories.filter(story => {
-    const matchesSearch = 
-      story.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      story.author.toLowerCase().includes(searchQuery.toLowerCase());
+  const continueReadingStory = useMemo(() => {
+    const inProgress = [...stories]
+      .filter(s => (s.lastReadAt || 0) > 0 || (s.currentProgressPercent > 0 && s.currentProgressPercent < 100))
+      .sort((a, b) => (b.lastReadAt || 0) - (a.lastReadAt || 0));
+    return inProgress[0] || (stories.length > 0 ? stories[0] : null);
+  }, [stories]);
 
-    if (!matchesSearch) return false;
+  const filteredStories = useMemo(() => {
+    const list = stories.filter(story => {
+      const matchesSearch = 
+        story.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        story.author.toLowerCase().includes(searchQuery.toLowerCase());
 
-    if (filterTab === 'reading') return story.currentProgressPercent > 0 && story.currentProgressPercent < 100;
-    if (filterTab === 'favorites') return story.isFavorite;
-    if (filterTab === 'comics') return story.source === 'local_comic';
-    if (filterTab === 'finished') return story.currentProgressPercent >= 100;
-    return true;
-  });
+      if (!matchesSearch) return false;
+
+      if (filterTab === 'reading') return story.currentProgressPercent > 0 && story.currentProgressPercent < 100;
+      if (filterTab === 'favorites') return story.isFavorite;
+      if (filterTab === 'comics') return story.source === 'local_comic';
+      if (filterTab === 'finished') return story.currentProgressPercent >= 100;
+      return true;
+    });
+
+    return list.sort((a, b) => {
+      switch (sortOption) {
+        case 'title':
+          return a.title.localeCompare(b.title);
+        case 'progress':
+          return (b.currentProgressPercent || 0) - (a.currentProgressPercent || 0);
+        case 'chapters':
+          return (b.totalChapters || 0) - (a.totalChapters || 0);
+        case 'recent':
+        default:
+          return (b.lastReadAt || 0) - (a.lastReadAt || 0);
+      }
+    });
+  }, [stories, searchQuery, filterTab, sortOption]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -187,6 +213,101 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
         </div>
       </div>
 
+      {/* Cinematic Hero: Continue Reading (Shown when not searching and on "all" tab) */}
+      {continueReadingStory && !searchQuery && filterTab === 'all' && (
+        <div className="mb-8 relative rounded-3xl overflow-hidden glass-panel border border-white/10 shadow-2xl p-5 sm:p-6 group">
+          {/* Subtle Blurred Background Cover Ambient Glow */}
+          {continueReadingStory.coverUrl && (
+            <div 
+              className="absolute -right-10 -bottom-10 w-96 h-96 rounded-full opacity-15 blur-3xl pointer-events-none"
+              style={{ backgroundImage: `url(${continueReadingStory.coverUrl})`, backgroundSize: 'cover' }}
+            />
+          )}
+
+          <div className="relative z-10 flex flex-col sm:flex-row items-center sm:items-stretch gap-5">
+            {/* Book Cover with 3D drop shadow */}
+            <div 
+              onClick={() => onOpenStory(continueReadingStory, 'read')}
+              className="relative w-28 h-40 sm:w-32 sm:h-48 rounded-xl overflow-hidden bg-gradient-to-br from-zinc-800 to-zinc-950 border border-white/10 shadow-2xl shrink-0 cursor-pointer group-hover:scale-105 transition-transform duration-300"
+            >
+              {continueReadingStory.coverUrl ? (
+                <img 
+                  src={continueReadingStory.coverUrl} 
+                  alt={continueReadingStory.title} 
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full p-3 flex flex-col justify-between bg-zinc-900 border-l-4 border-amber-500">
+                  <Sparkles className="w-5 h-5 text-amber-400" />
+                  <span className="font-serif font-bold text-xs text-zinc-100 line-clamp-3">
+                    {continueReadingStory.title}
+                  </span>
+                </div>
+              )}
+              {/* Progress pill on cover */}
+              <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-xs text-[10px] font-mono font-bold text-amber-300 border border-white/10">
+                {Math.round(continueReadingStory.currentProgressPercent || 0)}%
+              </div>
+            </div>
+
+            {/* Info & Action Buttons */}
+            <div className="flex-1 flex flex-col justify-between text-center sm:text-left min-w-0">
+              <div>
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-400" /> Tiếp tục đọc
+                  </span>
+                  <span className="text-xs text-zinc-400">
+                    Chương {continueReadingStory.currentChapterNumber || 1} / {continueReadingStory.totalChapters}
+                  </span>
+                </div>
+
+                <h2 className="text-lg sm:text-2xl font-bold text-zinc-100 line-clamp-2 leading-snug group-hover:text-amber-300 transition-colors">
+                  {continueReadingStory.title}
+                </h2>
+                <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+                  {continueReadingStory.author}
+                </p>
+
+                {/* Progress bar */}
+                <div className="mt-4 max-w-md mx-auto sm:mx-0 space-y-1.5">
+                  <div className="flex justify-between text-[11px] text-zinc-400">
+                    <span>Tiến độ đọc</span>
+                    <span className="font-mono text-amber-400 font-bold">{Math.round(continueReadingStory.currentProgressPercent || 0)}%</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-zinc-800/80 overflow-hidden border border-white/5">
+                    <div 
+                      className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 rounded-full transition-all duration-500 glow-amber"
+                      style={{ width: `${Math.min(100, Math.max(3, continueReadingStory.currentProgressPercent || 0))}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 mt-5">
+                <button
+                  onClick={() => onOpenStory(continueReadingStory, 'read')}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-zinc-950 font-bold text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  Đọc tiếp Chương {continueReadingStory.currentChapterNumber || 1}
+                </button>
+                {continueReadingStory.source !== 'local_comic' && (
+                  <button
+                    onClick={() => onOpenStory(continueReadingStory, 'listen')}
+                    className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-semibold text-xs sm:text-sm flex items-center gap-2 border border-amber-500/25 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <Headphones className="w-4 h-4" />
+                    Nghe Audio
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filter Tabs, View Mode Switch & Search */}
       <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between mb-6">
         {/* Smart Shelf Tabs */}
@@ -233,8 +354,23 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           </button>
         </div>
 
-        {/* View Switcher & Search Bar */}
-        <div className="flex items-center gap-2">
+        {/* View Switcher, Sort & Search Bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Sort Selector */}
+          <div className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800/80 rounded-xl border border-zinc-700/60 text-xs text-zinc-300">
+            <ArrowUpDown className="w-3.5 h-3.5 text-amber-400" />
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value as SortOption)}
+              className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
+            >
+              <option value="recent" className="bg-zinc-900 text-zinc-200">Mới đọc</option>
+              <option value="title" className="bg-zinc-900 text-zinc-200">Tên A-Z</option>
+              <option value="progress" className="bg-zinc-900 text-zinc-200">Tiến độ</option>
+              <option value="chapters" className="bg-zinc-900 text-zinc-200">Số chương</option>
+            </select>
+          </div>
+
           {/* View Mode Toggle */}
           <div className="flex items-center p-1 bg-zinc-800/80 rounded-xl border border-zinc-700/60 shrink-0">
             <button
@@ -257,16 +393,24 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             </button>
           </div>
 
-          {/* Search Input */}
-          <div className="relative min-w-[200px] flex-1 sm:flex-initial">
+          {/* Search Input with Clear Button */}
+          <div className="relative min-w-[180px] flex-1 sm:flex-initial">
             <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm theo tên truyện hoặc tác giả..."
-              className="w-full bg-zinc-800/80 border border-zinc-700 rounded-xl pl-9 pr-3 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500 transition-colors"
+              placeholder="Tìm tên truyện hoặc tác giả..."
+              className="w-full bg-zinc-800/80 border border-zinc-700 rounded-xl pl-9 pr-8 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-amber-500 transition-colors"
             />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -386,18 +530,21 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           {filteredStories.map((story) => (
             <div
               key={story.id}
-              className="group relative bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/50 hover:border-amber-500/40 rounded-2xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xl hover:shadow-black/30"
+              className="group relative book-card-pro bg-zinc-900/75 hover:bg-zinc-800/80 border border-white/5 rounded-2xl p-4 flex flex-col justify-between transition-all duration-300"
             >
               {/* Cover & Main Info */}
               <div>
-                <div className="flex gap-3 mb-3">
+                <div className="flex gap-3.5 mb-3.5">
                   {/* Book Cover */}
-                  <div className="relative w-20 h-28 rounded-xl overflow-hidden bg-gradient-to-br from-zinc-700 to-zinc-900 border border-zinc-700/80 shadow-md shrink-0 flex items-center justify-center">
+                  <div 
+                    onClick={() => onOpenStory(story, 'read')}
+                    className="relative w-20 h-28 rounded-xl overflow-hidden bg-gradient-to-br from-zinc-700 to-zinc-900 border border-zinc-700/80 shadow-md shrink-0 flex items-center justify-center cursor-pointer group-hover:scale-105 transition-transform duration-300"
+                  >
                     {story.coverUrl ? (
                       <img
                         src={story.coverUrl}
                         alt={story.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        className="w-full h-full object-cover"
                       />
                     ) : (
                       <div className="p-2 text-center">
@@ -408,7 +555,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                       </div>
                     )}
                     {/* Source Badge */}
-                    <span className="absolute bottom-1 right-1 px-1 py-0.5 rounded text-[9px] uppercase font-bold bg-zinc-950/80 text-zinc-300 backdrop-blur-xs">
+                    <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[8px] uppercase font-bold bg-zinc-950/85 text-amber-300 border border-white/5 backdrop-blur-xs">
                       {story.source.replace('local_', '')}
                     </span>
                   </div>
@@ -416,7 +563,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   {/* Title & Author */}
                   <div className="flex-1 min-w-0 flex flex-col justify-between">
                     <div>
-                      <h3 className="font-semibold text-sm text-zinc-100 line-clamp-2 leading-snug group-hover:text-amber-300 transition-colors">
+                      <h3 
+                        onClick={() => onOpenStory(story, 'read')}
+                        className="font-bold text-sm text-zinc-100 line-clamp-2 leading-snug group-hover:text-amber-300 transition-colors cursor-pointer"
+                      >
                         {story.title}
                       </h3>
                       <p className="text-xs text-zinc-400 mt-1 truncate">
@@ -432,19 +582,19 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 </div>
 
                 {/* Progress bar */}
-                <div className="space-y-1 mb-3">
+                <div className="space-y-1.5 mb-3.5">
                   <div className="flex justify-between text-[11px] text-zinc-400">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3 text-zinc-500" />
                       Chương {story.currentChapterNumber || 1}/{story.totalChapters}
                     </span>
-                    <span className="font-medium text-amber-400">
+                    <span className="font-mono font-semibold text-amber-400">
                       {Math.round(story.currentProgressPercent || 0)}%
                     </span>
                   </div>
-                  <div className="w-full h-1.5 rounded-full bg-zinc-700 overflow-hidden">
+                  <div className="w-full h-1.5 rounded-full bg-zinc-800 overflow-hidden border border-white/5">
                     <div
-                      className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full transition-all duration-300"
+                      className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 rounded-full transition-all duration-300"
                       style={{ width: `${Math.min(100, Math.max(2, story.currentProgressPercent || 0))}%` }}
                     />
                   </div>
@@ -452,22 +602,24 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-1.5 pt-2 border-t border-zinc-700/50">
+              <div className="flex items-center gap-1.5 pt-2.5 border-t border-white/5">
                 <button
                   onClick={() => onOpenStory(story, 'read')}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-200 hover:text-white text-xs font-medium transition-colors cursor-pointer"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-zinc-950 text-xs font-bold shadow-md shadow-amber-500/15 active:scale-95 transition-all cursor-pointer"
                 >
-                  <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                  <BookOpen className="w-3.5 h-3.5" />
                   Đọc tiếp
                 </button>
 
-                <button
-                  onClick={() => onOpenStory(story, 'listen')}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-medium transition-colors cursor-pointer"
-                >
-                  <Headphones className="w-3.5 h-3.5" />
-                  Nghe audio
-                </button>
+                {story.source !== 'local_comic' && (
+                  <button
+                    onClick={() => onOpenStory(story, 'listen')}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-amber-300 border border-amber-500/20 text-xs font-semibold active:scale-95 transition-all cursor-pointer"
+                  >
+                    <Headphones className="w-3.5 h-3.5" />
+                    Nghe
+                  </button>
+                )}
 
                 <button
                   onClick={() => onToggleFavorite(story.id)}

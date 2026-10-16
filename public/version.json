@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.44",
-  "versionCode": 144,
-  "buildTime": "2026-10-16T14:30:00Z",
-  "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/v1.0.44/ChillReader-v1.0.apk",
+  "versionName": "1.0.45",
+  "versionCode": 145,
+  "buildTime": "2026-10-16T16:50:00Z",
+  "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "HEAD",
-  "releaseNotes": "Bản nâng cấp Đẳng Cấp Cao Cấp v1.0.44:\n• Kệ sách Gỗ Cổ Điển Boutique: Trưng bày gáy sách 3D dập nổi chữ vàng, ruy băng đánh dấu trang, chuyển đổi linh hoạt giữa Dạng Lưới và Kệ Gỗ Sang Trọng.\n• Trợ lý AI Đồng Hành (Chống Spoil Tuyệt Đối): Hỏi đáp bối cảnh, cảnh giới, quan hệ nhân vật độc quyền theo đúng tiến độ chương đang đọc mà không bao giờ lộ cốt truyện tương lai.\n• Công nghệ Đọc Bionic Reading: Tăng tốc độ đọc x2 bằng phương pháp in đậm tiền tố từ vựng khoa học.\n• Trải nghiệm giác quan sống động: Hiệu ứng âm thanh lật giấy vật lý chân thực khi chuyển trang; Không gian âm thanh Chuông xoay Tây Tạng (432Hz/528Hz) & Thư viện cổ kính; Thước đọc tập trung (Reading Ruler); Bộ lọc ánh sáng ấm bảo vệ mắt (Candlelight 1800K–2700K) và Vân giấy cổ điển.\n• Két lưu trữ ChillVault (.chillvault): Xuất & Nhập toàn bộ kho sách, chương đọc, ghi chú và cài đặt hoàn toàn offline chỉ với 1 chạm."
+  "releaseNotes": "Bản nâng cấp Giao Diện Chuyên Nghiệp (Professional UI) v1.0.45:\n• Banner Tiêu Điểm 'Tiếp tục đọc' (Hero Spotlight): Thẻ nổi bật đầu tủ sách với hiệu ứng hào quang mờ, bìa sách 3D, thanh tiến độ phát sáng và nút đọc tiếp tức thì.\n• Dock điều khiển đọc thông minh (Apple Books / Kindle Style): Thanh Dock nổi kính mờ ở đáy màn hình đọc với thanh trượt chuyển nhanh chương truyện, nút nghe audio phân vai, gọi AI chống spoil và mục lục.\n• Thanh đo tiến độ cuộn trang siêu mỏng: Dải sáng mạ vàng siêu mỏng ở đỉnh màn hình theo dõi chính xác % đọc của chương.\n• Trình phát Audio Mini Capsule: Hộp phát audio nổi phong cách viên nang kính mờ với sóng âm động nhảy theo nhịp đọc và thanh tiến độ mảnh viền trên.\n• Thanh điều hướng dưới đáy (Floating Bottom Dock): Thiết kế dock nổi bo cong mềm mại cho điện thoại.\n• Bộ lọc sắp xếp tủ sách: Phân loại theo Mới đọc gần đây, Tên A-Z, Tiến độ đọc cao nhất và Số chương."
 }

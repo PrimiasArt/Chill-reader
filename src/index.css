@@ -180,3 +180,79 @@
   border-radius: 4px 0 0 4px;
 }
 
+/* Glassmorphism Pro Panels */
+.glass-panel {
+  background: rgba(18, 18, 22, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-dock {
+  background: rgba(15, 15, 18, 0.88);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.7), 0 0 20px rgba(245, 158, 11, 0.04);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Audio Waveform Equalizer Animation */
+@keyframes audioWave1 {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
+}
+
+@keyframes audioWave2 {
+  0%, 100% { height: 14px; }
+  50% { height: 6px; }
+}
+
+@keyframes audioWave3 {
+  0%, 100% { height: 8px; }
+  50% { height: 18px; }
+}
+
+.audio-bar-1 {
+  animation: audioWave1 0.8s ease-in-out infinite;
+}
+
+.audio-bar-2 {
+  animation: audioWave2 0.65s ease-in-out infinite;
+}
+
+.audio-bar-3 {
+  animation: audioWave3 0.9s ease-in-out infinite;
+}
+
+/* Ambient Glows */
+.glow-amber {
+  box-shadow: 0 0 25px rgba(245, 158, 11, 0.15);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.15);
+}
+
+/* Book Card Pro Hover */
+.book-card-pro {
+  transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.book-card-pro:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 20px rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+/* Safe Area Utility */
+.safe-area-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
