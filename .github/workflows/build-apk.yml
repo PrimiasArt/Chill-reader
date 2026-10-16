@@ -33,24 +33,36 @@ jobs:
       - name: Install Node Dependencies
         run: npm install
 
-      - name: Generate version.json before Web Build
+      - name: Parse and Prepare Version Info
         run: |
-          RUN_NUM="${{ github.run_number }}"
-          VERSION_CODE=$((100 + RUN_NUM))
-          VERSION_NAME="1.0.${RUN_NUM}"
-          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          mkdir -p public
-          cat << EOF > public/version.json
-          {
-            "versionName": "${VERSION_NAME}",
-            "versionCode": ${VERSION_CODE},
-            "buildTime": "${BUILD_TIME}",
-            "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
-            "commit": "${{ github.sha }}",
-            "releaseNotes": "Bản cập nhật v${VERSION_NAME} tự động qua GitHub Actions"
-          }
-          EOF
-          cp public/version.json version.json
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
+            let versionData = {};
+            try {
+              versionData = JSON.parse(fs.readFileSync('./public/version.json', 'utf8'));
+            } catch (e) {}
+
+            const versionName = versionData.versionName || pkg.version || '1.0.44';
+            const versionCode = Number(versionData.versionCode) || 144;
+            const releaseNotes = versionData.releaseNotes || ('Bản cập nhật v' + versionName);
+
+            versionData.versionName = versionName;
+            versionData.versionCode = versionCode;
+            versionData.buildTime = new Date().toISOString();
+            versionData.commit = process.env.GITHUB_SHA || '';
+            versionData.downloadUrl = 'https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk';
+            versionData.releaseNotes = releaseNotes;
+
+            fs.writeFileSync('./public/version.json', JSON.stringify(versionData, null, 2));
+            fs.writeFileSync('./version.json', JSON.stringify(versionData, null, 2));
+
+            const envFile = process.env.GITHUB_ENV;
+            if (envFile) {
+              fs.appendFileSync(envFile, 'APP_VERSION_NAME=' + versionName + '\n');
+              fs.appendFileSync(envFile, 'APP_VERSION_CODE=' + versionCode + '\n');
+            }
+          "
 
       - name: Build Web App (Vite)
         run: npm run build
@@ -63,25 +75,25 @@ jobs:
 
       - name: Build Debug APK with Gradle
         env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          APP_VERSION_NAME: ${{ env.APP_VERSION_NAME }}
+          APP_VERSION_CODE: ${{ env.APP_VERSION_CODE }}
         run: |
           cd android
           ./gradlew :app:assembleDebug --stacktrace
 
       - name: Prepare APK outputs
         run: |
-          RUN_NUM="${{ github.run_number }}"
           APK_SRC="android/app/build/outputs/apk/debug/app-debug.apk"
           cp "$APK_SRC" ChillReader-v1.0.apk
-          cp "$APK_SRC" "ChillReader-v1.0.${RUN_NUM}.apk"
+          cp "$APK_SRC" "ChillReader-v${{ env.APP_VERSION_NAME }}.apk"
 
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChillReader-v1.0.${{ github.run_number }}-APK
+          name: ChillReader-v${{ env.APP_VERSION_NAME }}-APK
           path: |
             ChillReader-v1.0.apk
-            ChillReader-v1.0.${{ github.run_number }}.apk
+            ChillReader-v${{ env.APP_VERSION_NAME }}.apk
             version.json
           retention-days: 30
 
@@ -89,25 +101,30 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Chill Reader APK v1.0.${{ github.run_number }} (Mới nhất)
+          tag_name: v${{ env.APP_VERSION_NAME }}
+          name: Chill Reader APK v${{ env.APP_VERSION_NAME }} (Mới nhất)
           make_latest: true
           body: |
-            ## 📱 Bản cài đặt Android APK (Chill Reader - v1.0.${{ github.run_number }})
-            - **Phiên bản:** `1.0.${{ github.run_number }}` (Mới nhất)
+            ## 📱 Bản cài đặt Android APK (Chill Reader - v${{ env.APP_VERSION_NAME }})
+            - **Phiên bản:** `v${{ env.APP_VERSION_NAME }}` (Build ${{ env.APP_VERSION_CODE }})
             - **Chữ ký cố định (Persistent Keystore):** Cài đè trực tiếp mà không cần gỡ bản cũ, giữ nguyên 100% dữ liệu sách offline và cài đặt đồng bộ Supabase Cloud.
-            - **Tính năng & Sửa lỗi:**
-              - 🚀 **Khắc phục triệt để lỗi tự dừng audio & mất UI Player màn hình khóa khi tắt màn hình (Android 12/13/14+):**
-                - **Native Silent AudioTrack:** Duy trì luồng âm thanh native ngầm ở tầng hệ thống Android OS giúp hệ điều hành nhận diện phát nhạc liên tục, không bao giờ thu hồi hoặc làm mất UI Player trên màn hình khóa.
-                - **In-Memory Playback Dispatch:** Cập nhật tiến độ đọc trực tiếp trong bộ nhớ thay vì gửi startForegroundService lặp lại từ background, tránh lỗi ForegroundServiceStartNotAllowedException của Android 12+.
-                - **Giữ WebView chạy ngầm:** Override lifecycle onPause/onStop trong MainActivity để duy trì timers và JS event loop khi tắt màn hình, đảm bảo chuyển câu không bị ngắt.
-                - **Tự động xin quyền chạy nền:** Bổ sung nhắc nhở cấp quyền bỏ qua tối ưu pin (Ignore Battery Optimizations) tự động khi phát audio.
-                - **Dự phòng rớt mạng:** Tự động chuyển đổi mượt mà sang giọng Offline máy nếu mạng bị gián đoạn lúc tắt màn hình.
+            
+            ### ✨ Tính năng & Cải tiến mới:
+            - 🏛️ **Kệ sách Gỗ Cổ Điển Boutique:** Trưng bày gáy sách 3D dập nổi chữ vàng, ruy băng đánh dấu trang, chuyển đổi linh hoạt giữa Dạng Lưới và Kệ Gỗ Sang Trọng.
+            - 🤖 **Trợ lý AI Đồng Hành (Chống Spoil Tuyệt Đối):** Hỏi đáp bối cảnh, cảnh giới, quan hệ nhân vật độc quyền theo đúng tiến độ chương đang đọc mà không bao giờ lộ cốt truyện tương lai.
+            - ⚡ **Công nghệ Đọc Bionic Reading:** Tăng tốc độ đọc x2 bằng phương pháp in đậm tiền tố từ vựng khoa học.
+            - 🎧 **Trải nghiệm giác quan sống động:** Hiệu ứng âm thanh lật giấy vật lý chân thực khi chuyển trang; Không gian âm thanh Chuông xoay Tây Tạng (432Hz/528Hz) & Thư viện cổ kính.
+            - 📖 **Trình đọc Comic & Manga (.CBZ, .CBR, .ZIP):** Hỗ trợ cuộn Webtoon dài và lật trang Cinema.
+            - 📷 **Chụp ảnh trang sách chuyển chữ OCR:** Gemini Vision AI nhận diện chữ từ Camera 1 chạm.
+            - 🔒 **Két lưu trữ ChillVault (.chillvault):** Xuất & Nhập toàn bộ kho sách, chương đọc, ghi chú và cài đặt hoàn toàn offline chỉ với 1 chạm.
+            - 🕯️ **Thước đọc tập trung (Reading Ruler)**, Bộ lọc ánh sáng ấm bảo vệ mắt (1800K–2700K) và Vân giấy cổ điển.
+            - 🎭 **Multi-Voice AI Drama:** Phân vai tự động theo hội thoại và giới tính nhân vật.
+            - 📥 **Tải Audio offline theo lô:** 1, 3, 5, 10 chương bảo đảm 100% không cần mạng.
 
-            👉 Tải file **`ChillReader-v1.0.apk`** hoặc **`ChillReader-v1.0.${{ github.run_number }}.apk`** bên dưới để cài đặt trực tiếp vào điện thoại Android.
+            👉 Tải file **`ChillReader-v1.0.apk`** hoặc **`ChillReader-v${{ env.APP_VERSION_NAME }}.apk`** bên dưới để cài đặt trực tiếp vào điện thoại Android.
           files: |
             ChillReader-v1.0.apk
-            ChillReader-v1.0.${{ github.run_number }}.apk
+            ChillReader-v${{ env.APP_VERSION_NAME }}.apk
             version.json
           draft: false
           prerelease: false
@@ -123,7 +140,7 @@ jobs:
           make_latest: false
           files: |
             ChillReader-v1.0.apk
-            ChillReader-v1.0.${{ github.run_number }}.apk
+            ChillReader-v${{ env.APP_VERSION_NAME }}.apk
             version.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

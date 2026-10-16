@@ -7,13 +7,13 @@ android {
         applicationId "com.chillreader.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        def runNumEnv = System.getenv('GITHUB_RUN_NUMBER')
-        def vCode = 110
-        def vName = "1.0.10"
-        if (runNumEnv) {
-            def runNum = runNumEnv.toInteger()
-            vCode = 100 + runNum
-            vName = "1.0." + runNum
+        def vCode = 144
+        def vName = "1.0.44"
+        def envVCode = System.getenv('APP_VERSION_CODE')
+        def envVName = System.getenv('APP_VERSION_NAME')
+        if (envVCode && envVName) {
+            vCode = envVCode.toInteger()
+            vName = envVName
         } else {
             try {
                 def versionFile = file('../../public/version.json')
