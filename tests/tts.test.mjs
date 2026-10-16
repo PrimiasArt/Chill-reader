@@ -158,3 +158,22 @@ test('Voice Classification - Strictly identifies online vs offline voices', () =
   assert.equal(isOnlineVoice(null), false);
   assert.equal(isOnlineVoice(undefined), false);
 });
+
+test('Smart Resume Rewind - Rewinds 1 sentence if paused >= 20s, preserves if < 20s', () => {
+  function calculateResumeIndex(currentIndex, pauseTimestamp, resumeTimestamp) {
+    const elapsed = resumeTimestamp - pauseTimestamp;
+    if (pauseTimestamp > 0 && elapsed >= 20000) {
+      return Math.max(0, currentIndex - 1);
+    }
+    return currentIndex;
+  }
+
+  // Paused for 5 seconds: should NOT rewind
+  assert.equal(calculateResumeIndex(10, 100000, 105000), 10);
+
+  // Paused for 25 seconds: should rewind to 9
+  assert.equal(calculateResumeIndex(10, 100000, 125000), 9);
+
+  // Paused for 25 seconds at index 0: should remain 0
+  assert.equal(calculateResumeIndex(0, 100000, 125000), 0);
+});

@@ -24,7 +24,8 @@ import {
   CloudRain,
   Plus,
   Lock,
-  Settings
+  Settings,
+  Users
 } from 'lucide-react';
 import { db } from '../services/db';
 import { supabaseSync, type SupabaseConfig } from '../services/sync/supabaseSync';
@@ -1147,6 +1148,75 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
           </label>
         </div>
 
+        {/* MULTI-VOICE DRAMA (KỊCH TRUYỀN THANH ĐA VAI) */}
+        <div className="bg-zinc-950/60 border border-zinc-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <Users className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <h3 className="font-semibold text-sm text-zinc-100 flex items-center gap-1.5">
+                  Kịch truyền thanh đa vai tự động
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    AI Drama
+                  </span>
+                </h3>
+                <p className="text-xs text-zinc-400">Tự động phân biệt lời dẫn truyện và lời đối thoại nhân vật nam / nữ</p>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ttsSettings.multiVoiceDrama || false}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  onUpdateTtsSettings({ multiVoiceDrama: val });
+                  ttsEngine.updateSettings({ multiVoiceDrama: val });
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
+          </div>
+
+          {ttsSettings.multiVoiceDrama && (
+            <div className="pt-3 border-t border-zinc-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-fade-in text-xs">
+              <div className="space-y-1.5">
+                <label className="text-zinc-400 font-medium">Giọng đối thoại Nữ:</label>
+                <select
+                  value={ttsSettings.femaleVoiceURI || 'edge:vi-VN-HoaiMyNeural'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    onUpdateTtsSettings({ femaleVoiceURI: val });
+                    ttsEngine.updateSettings({ femaleVoiceURI: val });
+                  }}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-zinc-200 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="edge:vi-VN-HoaiMyNeural">Hoài My (Edge AI Neural - Nữ)</option>
+                  <option value="google:vi-VN-Standard-A">Google Tiếng Việt A (Nữ)</option>
+                  <option value="google:vi-VN-Wavenet-A">Google Tiếng Việt Wavenet A (Nữ)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-zinc-400 font-medium">Giọng đối thoại Nam:</label>
+                <select
+                  value={ttsSettings.maleVoiceURI || 'edge:vi-VN-NamMinhNeural'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    onUpdateTtsSettings({ maleVoiceURI: val });
+                    ttsEngine.updateSettings({ maleVoiceURI: val });
+                  }}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-zinc-200 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="edge:vi-VN-NamMinhNeural">Nam Minh (Edge AI Neural - Nam)</option>
+                  <option value="google:vi-VN-Standard-B">Google Tiếng Việt B (Nam)</option>
+                  <option value="google:vi-VN-Wavenet-B">Google Tiếng Việt Wavenet B (Nam)</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* BACKGROUND & LOCK SCREEN PLAYBACK OPTIMIZATION */}
         <div className="bg-zinc-950/60 border border-zinc-800 rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -1243,7 +1313,7 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
               Tự động phối tiếng mưa rơi, củi lửa tí tách hoặc gió rừng trúc cùng giọng đọc truyện giúp ngủ ngon và thư giãn sâu.
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {AMBIENT_SOUND_OPTIONS.map((opt) => (
                 <button
                   key={opt.id}
@@ -1284,6 +1354,27 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
                 />
               </div>
             )}
+
+            {/* Auto Context Dynamic Ambient Toggle */}
+            <div className="pt-2 border-t border-zinc-800">
+              <label className="flex items-start gap-2.5 cursor-pointer select-none text-xs text-zinc-300 bg-zinc-950/50 p-2.5 rounded-xl border border-amber-500/20 hover:border-amber-500/40 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={ttsSettings.autoContextAmbient || false}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    onUpdateTtsSettings({ autoContextAmbient: val });
+                    ttsEngine.updateSettings({ autoContextAmbient: val });
+                    ambientAudioService.setAutoContext(val);
+                  }}
+                  className="w-4 h-4 accent-amber-500 rounded mt-0.5 shrink-0"
+                />
+                <div>
+                  <span className="font-semibold text-amber-300">Âm thanh bối cảnh thông minh (Auto Context):</span>{' '}
+                  <span className="text-zinc-400">Tự động chuyển đổi âm thanh nền (mưa gió, suối reo, củi lửa) theo các từ khóa cảnh vật trong truyện khi đang đọc.</span>
+                </div>
+              </label>
+            </div>
           </div>
         )}
       </div>

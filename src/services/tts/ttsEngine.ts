@@ -4,6 +4,7 @@ import { db } from '../db';
 import { pronunciationService } from './pronunciation';
 import { shakeDetector } from './shakeDetector';
 import { ambientAudioService } from './ambientAudio';
+import { analyzeSentenceRole } from './dialogueDetector';
 
 export type TTSState = 'idle' | 'playing' | 'paused';
 
@@ -83,6 +84,7 @@ class TTSEngine {
   // Guard against race conditions and obsolete callbacks
   private playbackToken = 0;
   private consecutiveErrors = 0;
+  private lastPauseTimestamp = 0;
 
   // Metadata for Native Notification & MediaSession
   private currentBookTitle = '';
@@ -592,6 +594,9 @@ class TTSEngine {
     this.sentences = this.splitIntoSentences(content);
     this.currentSentenceIndex = Math.max(0, Math.min(startFromSentenceIndex, Math.max(0, this.sentences.length - 1)));
     this.updateMediaSessionMetadata();
+    if (this.currentStoryId && this.currentChapterNumber) {
+      this.preloadOfflineAudioForChapter(this.currentStoryId, this.currentChapterNumber).catch(() => {});
+    }
     this.listeners.forEach(l => l.onChapterChange?.(this.currentChapterNumber, this.currentChapterTitle));
   }
 
@@ -627,6 +632,18 @@ class TTSEngine {
     }
 
     if (this.state === 'paused') {
+      const now = Date.now();
+      // Smart resume rewind: if paused for >= 20 seconds, rewind 1 sentence to restore context
+      if (this.lastPauseTimestamp > 0 && now - this.lastPauseTimestamp >= 20000) {
+        if (this.currentSentenceIndex > 0) {
+          this.currentSentenceIndex = Math.max(0, this.currentSentenceIndex - 1);
+          if (hasNativeBridge && typeof androidMedia.jumpNativeSentence === 'function') {
+            androidMedia.jumpNativeSentence(this.currentSentenceIndex);
+          }
+        }
+      }
+      this.lastPauseTimestamp = 0;
+
       if (hasNativeBridge && typeof androidMedia.resumeNative === 'function') {
         androidMedia.resumeNative();
       } else if (this.isOnlineVoice() && this.activePlayer && this.activePlayer.src) {
@@ -666,6 +683,7 @@ class TTSEngine {
 
   public pause() {
     this.playbackToken++; // Invalidate pending async transitions
+    this.lastPauseTimestamp = Date.now();
     this.stopBackgroundAudioContext();
     const androidMedia = (window as any).AndroidMedia;
     if (androidMedia && typeof androidMedia.pauseNative === 'function') {
@@ -787,12 +805,47 @@ class TTSEngine {
     }
   }
 
-  private getAudioUrl(sentenceText: string): string {
+  private getAudioUrl(sentenceText: string, index?: number): string {
     const processedText = pronunciationService.applyRules(sentenceText);
-    const voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
+    let voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
+
+    // Multi-Voice AI Drama: Dialogue character voice detection
+    if (this.settings.multiVoiceDrama) {
+      const prevSentence = (typeof index === 'number' && index > 0) ? this.sentences[index - 1] : undefined;
+      const roleAnalysis = analyzeSentenceRole(sentenceText, prevSentence);
+      if (roleAnalysis.isDialogue) {
+        if (roleAnalysis.role === 'female') {
+          voice = this.settings.femaleVoiceURI || 'edge:vi-VN-HoaiMyNeural';
+        } else {
+          voice = this.settings.maleVoiceURI || 'edge:vi-VN-NamMinhNeural';
+        }
+      }
+    }
+
     const isGoogle = voice.startsWith('google');
     const serverRate = isGoogle ? 1.0 : Math.min(2.0, Math.max(0.5, this.settings.rate));
     return `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${serverRate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(processedText)}`;
+  }
+
+  /**
+   * Preload all offline audio records for a chapter into in-memory Blob URL cache
+   */
+  public async preloadOfflineAudioForChapter(storyId: string, chapterNumber: number): Promise<void> {
+    try {
+      const records = await db.offlineAudioCache
+        .where('storyId')
+        .equals(storyId)
+        .and(r => r.chapterNumber === chapterNumber)
+        .toArray();
+
+      for (const rec of records) {
+        if (!this.audioBlobCache.has(rec.sentenceIndex)) {
+          this.audioBlobCache.set(rec.sentenceIndex, URL.createObjectURL(rec.audioBlob));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to preload offline chapter audio:', e);
+    }
   }
 
   /**
@@ -821,7 +874,7 @@ class TTSEngine {
     }
 
     const text = this.sentences[index];
-    const url = this.getAudioUrl(text);
+    const url = this.getAudioUrl(text, index);
 
     try {
       const res = await fetch(url);
@@ -849,16 +902,22 @@ class TTSEngine {
   public async downloadChapterAudio(
     storyId: string,
     chapterNumber: number,
-    onProgress?: (done: number, total: number) => void
+    onProgress?: (done: number, total: number) => void,
+    customSentences?: string[],
+    signal?: AbortSignal
   ): Promise<{ success: boolean; total: number; downloaded: number }> {
-    if (this.sentences.length === 0) {
+    const list = customSentences || this.sentences;
+    if (list.length === 0) {
       return { success: false, total: 0, downloaded: 0 };
     }
 
-    const total = this.sentences.length;
+    const total = list.length;
     let downloaded = 0;
 
     for (let i = 0; i < total; i++) {
+      if (signal?.aborted) {
+        return { success: false, total, downloaded };
+      }
       try {
         const existing = await db.getOfflineAudio(storyId, chapterNumber, i);
         if (existing) {
@@ -867,14 +926,17 @@ class TTSEngine {
           continue;
         }
 
-        const text = this.sentences[i];
-        const url = this.getAudioUrl(text);
-        const res = await fetch(url);
+        const text = list[i];
+        const url = this.getAudioUrl(text, i);
+        const res = await fetch(url, { signal });
         if (res.ok) {
           const blob = await res.blob();
           await db.saveOfflineAudio(storyId, chapterNumber, i, blob);
         }
-      } catch (e) {
+      } catch (e: any) {
+        if (signal?.aborted || e?.name === 'AbortError') {
+          return { success: false, total, downloaded };
+        }
         console.warn(`Failed to cache sentence ${i}:`, e);
       }
       downloaded++;
@@ -882,6 +944,57 @@ class TTSEngine {
     }
 
     return { success: true, total, downloaded };
+  }
+
+  /**
+   * Pre-download audio for a batch of multiple chapters
+   */
+  public async downloadChaptersBatch(
+    storyId: string,
+    chapters: { chapterNumber: number; content: string }[],
+    onProgress?: (progress: {
+      chapterIndex: number;
+      totalChapters: number;
+      currentChapterNumber: number;
+      sentenceDone: number;
+      sentenceTotal: number;
+      overallPercent: number;
+    }) => void,
+    signal?: AbortSignal
+  ): Promise<{ success: boolean; downloadedChapters: number }> {
+    let downloadedChapters = 0;
+    const totalChapters = chapters.length;
+
+    for (let cIdx = 0; cIdx < totalChapters; cIdx++) {
+      if (signal?.aborted) break;
+      const ch = chapters[cIdx];
+      const sentences = this.splitIntoSentences(ch.content);
+      if (sentences.length === 0) continue;
+
+      await this.downloadChapterAudio(
+        storyId,
+        ch.chapterNumber,
+        (sDone, sTotal) => {
+          const basePercent = (cIdx / totalChapters) * 100;
+          const chapterPercent = (sDone / sTotal) * (100 / totalChapters);
+          const overallPercent = Math.min(100, Math.round(basePercent + chapterPercent));
+          onProgress?.({
+            chapterIndex: cIdx + 1,
+            totalChapters,
+            currentChapterNumber: ch.chapterNumber,
+            sentenceDone: sDone,
+            sentenceTotal: sTotal,
+            overallPercent
+          });
+        },
+        sentences,
+        signal
+      );
+
+      downloadedChapters++;
+    }
+
+    return { success: !signal?.aborted, downloadedChapters };
   }
 
   /**
@@ -926,13 +1039,13 @@ class TTSEngine {
           setupNext(blobUrl);
         } else {
           // Fallback to direct URL preloading
-          setupNext(this.getAudioUrl(this.sentences[nextIdx]));
+          setupNext(this.getAudioUrl(this.sentences[nextIdx], nextIdx));
         }
       });
     }
   }
 
-  private speakCurrentSentence() {
+  private async speakCurrentSentence() {
     if (this.state !== 'playing') return;
 
     // Check if we reached the end of the chapter
@@ -958,6 +1071,12 @@ class TTSEngine {
     const sentence = this.sentences[sentenceIdx];
     this.notifySentence(sentenceIdx, sentence);
     this.updateNativeNotification(true);
+
+    // Dynamic Contextual Ambient Sound
+    if (this.settings.autoContextAmbient) {
+      ambientAudioService.setAutoContext(true);
+      ambientAudioService.analyzeAndApplyContext(sentence);
+    }
 
     // 1. Online AI Neural / Google TTS playback with gapless double buffering
     if (this.isOnlineVoice()) {
@@ -1016,11 +1135,25 @@ class TTSEngine {
 
       // Check if current player already has this exact sentence loaded
       if (this.playerLoadedSentenceIndex[activeIdx] !== sentenceIdx) {
-        const cachedBlob = this.audioBlobCache.get(sentenceIdx);
+        let cachedBlob = this.audioBlobCache.get(sentenceIdx);
+        if (!cachedBlob && this.currentStoryId && this.currentChapterNumber) {
+          try {
+            const dbBlob = await db.getOfflineAudio(this.currentStoryId, this.currentChapterNumber, sentenceIdx);
+            if (dbBlob && currentToken === this.playbackToken) {
+              cachedBlob = URL.createObjectURL(dbBlob);
+              this.audioBlobCache.set(sentenceIdx, cachedBlob);
+            }
+          } catch (e) {
+            console.warn('Error reading from offline audio cache:', e);
+          }
+        }
+
+        if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+
         if (cachedBlob) {
           player.src = cachedBlob;
         } else {
-          player.src = this.getAudioUrl(sentence);
+          player.src = this.getAudioUrl(sentence, sentenceIdx);
         }
         this.playerLoadedSentenceIndex[activeIdx] = sentenceIdx;
       }

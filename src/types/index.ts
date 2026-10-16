@@ -1,7 +1,7 @@
 export type ReaderTheme = 'sepia' | 'dark' | 'amoled' | 'light' | 'paper';
 export type FontFamily = 'serif' | 'sans' | 'lora' | 'merriweather';
 export type ReaderMode = 'scroll' | 'paged';
-export type StorySource = 'local_txt' | 'local_epub' | 'local_pdf' | 'crawler';
+export type StorySource = 'local_txt' | 'local_epub' | 'local_pdf' | 'crawler' | 'local_comic' | 'ocr';
 
 export interface Story {
   id: string;
@@ -42,6 +42,11 @@ export interface ReaderSettings {
   autoScroll: boolean;
   autoScrollSpeed: number; // 1 - 10
   keepScreenAwake?: boolean;
+  bionicReading?: boolean;
+  readingRuler?: boolean;
+  pageTurnSound?: boolean;
+  paperTexture?: boolean;
+  warmthLevel?: number; // 0 - 100% warm amber light filter
 }
 
 export type TTSEngineType = 'ai' | 'google' | 'browser' | 'native';
@@ -55,6 +60,10 @@ export interface TTSSettings {
   highlightSentence: boolean;
   autoNextChapter: boolean;
   playAlongOtherApps?: boolean;
+  multiVoiceDrama?: boolean;
+  femaleVoiceURI?: string;
+  maleVoiceURI?: string;
+  autoContextAmbient?: boolean;
 }
 
 export interface CrawlSearchResult {

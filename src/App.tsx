@@ -424,6 +424,7 @@ export const App: React.FC = () => {
                 onOpenImport={() => setIsImportModalOpen(true)}
                 onOpenCrawler={() => setCurrentTab('crawler')}
                 onOpenSettings={() => setCurrentTab('settings')}
+                onReloadStories={loadLibrary}
               />
             )}
 

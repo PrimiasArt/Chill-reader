@@ -21,16 +21,27 @@ import {
   BookMarked,
   Quote,
   Sparkles,
-  MoreVertical
+  MoreVertical,
+  Copy,
+  Volume2,
+  Flame,
+  Bot
 } from 'lucide-react';
 import type { Story, Chapter, ReaderSettings, ReaderTheme, FontFamily, CrawlSearchResult } from '../types';
 import { ttsEngine, type TTSState } from '../services/tts/ttsEngine';
 import { supabaseSync } from '../services/sync/supabaseSync';
 import { fetchStoryDetail, batchDownloadChapters, searchStories } from '../services/crawler';
 import { db } from '../services/db';
+import { readingStatsService } from '../services/stats/readingStatsService';
+import { ambientAudioService } from '../services/tts/ambientAudio';
+import { renderBionicWord } from '../services/reader/bionicReader';
 import { StoryNotesDrawer } from './StoryNotesDrawer';
 import { QuoteCardModal } from './QuoteCardModal';
+import { HanVietModal } from './HanVietModal';
+import { OfflineAudioModal } from './OfflineAudioModal';
 import { AISummaryModal } from './AISummaryModal';
+import { ReadingStatsModal } from './ReadingStatsModal';
+import { StoryAiCompanionModal } from './StoryAiCompanionModal';
 import { exportStoryToEpub, exportStoryToTxt } from '../services/export/epubExport';
 
 interface ReaderViewProps {
@@ -74,19 +85,16 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [selectedQuoteText, setSelectedQuoteText] = useState('');
   const [showAiSummaryModal, setShowAiSummaryModal] = useState(false);
   const [showMoreToolsModal, setShowMoreToolsModal] = useState(false);
-
-  const handleOpenQuoteModal = () => {
-    let text = '';
-    if (typeof window !== 'undefined') {
-      const sel = window.getSelection()?.toString().trim();
-      if (sel) text = sel;
-    }
-    if (!text && sentences.length > 0) {
-      text = sentences[activeSentenceIndex] || sentences[0] || '';
-    }
-    setSelectedQuoteText(text);
-    setShowQuoteModal(true);
-  };
+  const [showHanVietModal, setShowHanVietModal] = useState(false);
+  const [hanVietQuery, setHanVietQuery] = useState('');
+  const [floatingToolbarPos, setFloatingToolbarPos] = useState<{ top: number; left: number } | null>(null);
+  const [selectedText, setSelectedText] = useState('');
+  const [copiedToast, setCopiedToast] = useState(false);
+  const [showOfflineAudioModal, setShowOfflineAudioModal] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showAiCompanion, setShowAiCompanion] = useState(false);
+  const [pageFlipDirection, setPageFlipDirection] = useState<'next' | 'prev'>('next');
+  const [rulerY, setRulerY] = useState<number | null>(null);
 
   // Quick jump & TOC search states
   const [tocSearch, setTocSearch] = useState('');
@@ -101,9 +109,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [isCheckingNewChapters, setIsCheckingNewChapters] = useState(false);
   const [checkNewMsg, setCheckNewMsg] = useState<string | null>(null);
 
-  // Audio download and export states
-  const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
-  const [audioDownloadProgress, setAudioDownloadProgress] = useState<{ done: number; total: number } | null>(null);
+  // Export state
   const [isExporting, setIsExporting] = useState(false);
 
   // On-demand download state for empty chapters
@@ -278,30 +284,87 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     }
   };
 
+  // Check if current chapter contains comic / manga images
+  const isComicChapter = React.useMemo(() => {
+    if (story.source === 'local_comic') return true;
+    if (!currentChapter || !currentChapter.content) return false;
+    return currentChapter.content.includes('"comicPages":');
+  }, [story.source, currentChapter]);
+
+  const comicPages = React.useMemo<string[]>(() => {
+    if (!isComicChapter || !currentChapter?.content) return [];
+    try {
+      const data = JSON.parse(currentChapter.content);
+      if (Array.isArray(data.comicPages)) {
+        return data.comicPages;
+      }
+    } catch {}
+    return [];
+  }, [isComicChapter, currentChapter]);
+
   // Split chapter content into clean readable sentences matching ttsEngine
   const sentences = React.useMemo(() => {
     if (!currentChapter || !currentChapter.content) return [];
+    if (isComicChapter && comicPages.length > 0) {
+      return comicPages.map((_, i) => `Trang ${i + 1}`);
+    }
     return ttsEngine.splitIntoSentences(currentChapter.content);
-  }, [currentChapter]);
+  }, [currentChapter, isComicChapter, comicPages]);
 
   // Paged mode calculations
   const sentencesPerPage = 8;
-  const totalPages = Math.max(1, Math.ceil(sentences.length / sentencesPerPage));
+  const totalPages = isComicChapter 
+    ? Math.max(1, comicPages.length) 
+    : Math.max(1, Math.ceil(sentences.length / sentencesPerPage));
 
   // Reset page when chapter changes
   useEffect(() => {
     setCurrentPageIndex(0);
   }, [currentChapterNumber]);
 
+  // Luxury page change with realistic page turn sound effect
+  const handlePageChange = (direction: 'next' | 'prev') => {
+    if (settings.pageTurnSound !== false) {
+      ambientAudioService.playPageTurnSound();
+    }
+    setPageFlipDirection(direction);
+    if (direction === 'next') {
+      setCurrentPageIndex(p => Math.min(totalPages - 1, p + 1));
+    } else {
+      setCurrentPageIndex(p => Math.max(0, p - 1));
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Luxury chapter change with realistic sound effect
+  const handleChapterChange = (chapterNumber: number) => {
+    if (settings.pageTurnSound !== false) {
+      ambientAudioService.playPageTurnSound();
+    }
+    onSelectChapter(chapterNumber);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Turn page automatically when TTS reads in paged mode
   useEffect(() => {
     if (settings.readerMode === 'paged' && ttsState !== 'idle' && activeSentenceIndex >= 0) {
       const pageOfActiveSentence = Math.floor(activeSentenceIndex / sentencesPerPage);
       if (pageOfActiveSentence !== currentPageIndex && pageOfActiveSentence < totalPages) {
+        setPageFlipDirection(pageOfActiveSentence > currentPageIndex ? 'next' : 'prev');
         setCurrentPageIndex(pageOfActiveSentence);
       }
     }
   }, [activeSentenceIndex, settings.readerMode, ttsState, totalPages, currentPageIndex]);
+
+  // Periodic reading activity tracker (Reading Stats & Streaks)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!document.hidden || ttsState === 'playing') {
+        readingStatsService.addReadingSeconds(10);
+      }
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [ttsState]);
 
   // Keep screen awake while reading or listening in ReaderView
   useEffect(() => {
@@ -397,28 +460,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     }
   };
 
-  // 1-Click Download Current Chapter Audio
-  const handleDownloadChapterAudio = async () => {
-    if (sentences.length === 0) return;
-    setIsDownloadingAudio(true);
-    setAudioDownloadProgress({ done: 0, total: sentences.length });
-    try {
-      await ttsEngine.downloadChapterAudio(
-        story.id,
-        currentChapter.chapterNumber,
-        (done, total) => {
-          setAudioDownloadProgress({ done, total });
-        }
-      );
-      setCheckNewMsg(`Đã tải ngoại tuyến cả chương (${sentences.length} câu) thành công!`);
-    } catch {
-      setCheckNewMsg('Tải audio thất bại. Vui lòng thử lại.');
-    } finally {
-      setIsDownloadingAudio(false);
-      setAudioDownloadProgress(null);
-      setTimeout(() => setCheckNewMsg(null), 3500);
-    }
-  };
 
   // Export handlers
   const handleExportEpub = async () => {
@@ -478,9 +519,12 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     }
   }, [activeSentenceIndex, ttsState, settings.readerMode]);
 
-  // Handle click on specific sentence to listen from that sentence (guarded against swipes)
+  // Handle click on specific sentence to listen from that sentence (guarded against swipes and selections)
   const handleSentenceClick = (index: number) => {
     if (isTouchDragging.current) return;
+    if (typeof window !== 'undefined' && window.getSelection()?.toString().trim()) {
+      return;
+    }
 
     if (ttsState === 'idle') {
       ttsEngine.loadChapter(
@@ -500,6 +544,96 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       ttsEngine.jumpToSentence(index);
     }
   };
+
+  const handleOpenHanViet = (text?: string) => {
+    let q = text || selectedText;
+    if (!q && typeof window !== 'undefined') {
+      q = window.getSelection()?.toString().trim() || '';
+    }
+    setHanVietQuery(q);
+    setShowHanVietModal(true);
+    setFloatingToolbarPos(null);
+  };
+
+  const handleOpenQuoteModal = (text?: string) => {
+    let q = text || selectedText;
+    if (!q && typeof window !== 'undefined') {
+      const sel = window.getSelection()?.toString().trim();
+      if (sel) q = sel;
+    }
+    if (!q && sentences.length > 0) {
+      q = sentences[activeSentenceIndex] || sentences[0] || '';
+    }
+    setSelectedQuoteText(q);
+    setShowQuoteModal(true);
+    setFloatingToolbarPos(null);
+  };
+
+  const handleCopySelectedText = async () => {
+    const text = selectedText || (typeof window !== 'undefined' ? window.getSelection()?.toString().trim() : '') || '';
+    if (text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopiedToast(true);
+        setTimeout(() => setCopiedToast(false), 2000);
+      } catch (e) {
+        console.error('Failed to copy text', e);
+      }
+    }
+    setFloatingToolbarPos(null);
+  };
+
+  const handlePlaySelectedText = () => {
+    if (selectedText) {
+      const idx = sentences.findIndex(s => s.toLowerCase().includes(selectedText.toLowerCase()) || selectedText.toLowerCase().includes(s.toLowerCase()));
+      if (idx !== -1) {
+        handleSentenceClick(idx);
+      } else {
+        onStartTTS();
+      }
+    }
+    setFloatingToolbarPos(null);
+  };
+
+  // Selection change listener for floating reader actions toolbar
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) {
+        setFloatingToolbarPos(null);
+        return;
+      }
+      const raw = sel.toString().trim();
+      if (!raw || raw.length === 0) {
+        setFloatingToolbarPos(null);
+        return;
+      }
+
+      setSelectedText(raw);
+
+      try {
+        if (sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            let top = rect.top - 48;
+            if (top < 60) {
+              top = rect.bottom + 10;
+            }
+            const left = Math.max(12, Math.min(window.innerWidth - 260, rect.left + (rect.width / 2) - 120));
+            setFloatingToolbarPos({ top, left });
+          }
+        }
+      } catch {
+        // Ignore range positioning issues
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, []);
 
   // Jump directly to a given chapter number
   const jumpToChapter = (chapterNum: number) => {
@@ -575,9 +709,9 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* TTS Toggle Button */}
             <button
-              disabled={chapters.length === 0}
+              disabled={chapters.length === 0 || isComicChapter}
               onClick={() => {
-                if (chapters.length === 0) return;
+                if (chapters.length === 0 || isComicChapter) return;
                 if (ttsState === 'idle') {
                   onStartTTS();
                 } else {
@@ -585,7 +719,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 }
               }}
               className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-medium transition-all shrink-0 ${
-                chapters.length === 0
+                chapters.length === 0 || isComicChapter
                   ? 'opacity-40 cursor-not-allowed bg-zinc-800 text-zinc-500 border border-zinc-700'
                   : ttsState === 'playing'
                   ? 'bg-amber-500 text-zinc-950 font-bold shadow-md shadow-amber-500/30 cursor-pointer'
@@ -593,11 +727,21 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer'
                   : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 cursor-pointer'
               }`}
-              title={chapters.length === 0 ? 'Chưa có nội dung để đọc audio' : 'Nghe audio chương này'}
+              title={
+                isComicChapter
+                  ? 'Truyện tranh hình ảnh không hỗ trợ đọc audio TTS'
+                  : chapters.length === 0
+                  ? 'Chưa có nội dung để đọc audio'
+                  : 'Nghe audio chương này'
+              }
             >
               <Headphones className="w-3.5 h-3.5" />
               <span className="text-[11px] hidden xs:inline sm:inline">
-                {ttsState === 'playing' ? 'Đang nghe' : (ttsState === 'paused' ? 'Tạm dừng' : 'Nghe')}
+                {isComicChapter
+                  ? 'Truyện tranh'
+                  : ttsState === 'playing'
+                  ? 'Đang nghe'
+                  : (ttsState === 'paused' ? 'Tạm dừng' : 'Nghe')}
               </span>
             </button>
 
@@ -633,9 +777,27 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 <Sparkles className="w-5 h-5" />
               </button>
 
+              {/* AI Story Companion (Anti-Spoiler Q&A) */}
+              <button
+                onClick={() => setShowAiCompanion(true)}
+                className="p-2 rounded-lg hover:bg-zinc-800 text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                title="Đàm đạo cùng Trợ lý AI (Hỏi đáp cốt truyện & cảnh giới không sợ Spoil)"
+              >
+                <Bot className="w-5 h-5" />
+              </button>
+
+              {/* Han-Viet & Web Novel Dictionary */}
+              <button
+                onClick={() => handleOpenHanViet()}
+                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
+                title="Từ điển Hán Việt & Tu Tiên (Tra từ offline)"
+              >
+                <BookOpen className="w-5 h-5" />
+              </button>
+
               {/* Quote Card Generator */}
               <button
-                onClick={handleOpenQuoteModal}
+                onClick={() => handleOpenQuoteModal()}
                 className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
                 title="Tạo thẻ trích dẫn nghệ thuật"
               >
@@ -813,8 +975,20 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           ref={containerRef}
           onClick={() => setShowControls(!showControls)}
           onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          className={`flex-1 max-w-3xl mx-auto w-full px-5 sm:px-8 pt-20 transition-all select-text cursor-default ${
+          onTouchMove={(e) => {
+            handleTouchMove(e);
+            if (settings.readingRuler && e.touches[0]) {
+              setRulerY(e.touches[0].clientY);
+            }
+          }}
+          onMouseMove={(e) => {
+            if (settings.readingRuler) {
+              setRulerY(e.clientY);
+            }
+          }}
+          className={`flex-1 max-w-3xl mx-auto w-full px-5 sm:px-8 pt-20 transition-all select-text cursor-default relative ${
+            settings.paperTexture ? 'paper-texture-overlay' : ''
+          } ${
             ttsState !== 'idle' ? 'pb-36' : 'pb-20'
           }`}
           style={{
@@ -834,10 +1008,73 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             </p>
           </div>
 
-          {/* Text Sentences - Paged vs Continuous Scroll */}
-          {settings.readerMode === 'paged' ? (
-            <div className="flex flex-col min-h-[55vh] justify-between">
-              <div className="space-y-4">
+          {/* Comic Viewer OR Text Sentences - Paged vs Continuous Scroll */}
+          {isComicChapter && comicPages.length > 0 ? (
+            settings.readerMode === 'paged' ? (
+              <div className="perspective-container flex flex-col items-center justify-between min-h-[60vh]">
+                <div 
+                  key={currentPageIndex} 
+                  className={`w-full max-w-2xl mx-auto flex flex-col items-center select-none ${pageFlipDirection === 'next' ? 'animate-page-flip-next' : 'animate-page-flip-prev'}`}
+                >
+                  <img
+                    src={comicPages[currentPageIndex]}
+                    alt={`Trang ${currentPageIndex + 1}`}
+                    className="w-full h-auto max-h-[78vh] object-contain rounded-xl shadow-2xl bg-zinc-950 border border-zinc-800"
+                  />
+                </div>
+
+                {/* Paged Navigation Bar */}
+                <div className="w-full max-w-2xl mt-6 pt-4 border-t border-current opacity-30 flex items-center justify-between text-xs">
+                  <button
+                    disabled={currentPageIndex === 0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePageChange('prev');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" /> Trang trước
+                  </button>
+
+                  <span className="font-mono text-xs opacity-80">
+                    Trang {currentPageIndex + 1} / {totalPages}
+                  </span>
+
+                  <button
+                    disabled={currentPageIndex >= totalPages - 1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePageChange('next');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
+                  >
+                    Trang sau <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="comic-scroll-view space-y-4 max-w-3xl mx-auto select-none">
+                {comicPages.map((imgSrc, pIdx) => (
+                  <div key={pIdx} className="relative group rounded-xl overflow-hidden shadow-2xl bg-zinc-950 border border-zinc-800">
+                    <img
+                      src={imgSrc}
+                      alt={`Trang ${pIdx + 1}`}
+                      className="w-full h-auto object-contain mx-auto block"
+                      loading={pIdx < 2 ? 'eager' : 'lazy'}
+                    />
+                    <div className="absolute bottom-2 right-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-xs text-[10px] font-mono text-zinc-300 opacity-60 group-hover:opacity-100 transition-opacity">
+                      {pIdx + 1} / {comicPages.length}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : settings.readerMode === 'paged' ? (
+            <div className="perspective-container flex flex-col min-h-[55vh] justify-between">
+              <div 
+                key={currentPageIndex} 
+                className={`space-y-4 ${pageFlipDirection === 'next' ? 'animate-page-flip-next' : 'animate-page-flip-prev'}`}
+              >
                 {sentences
                   .slice(currentPageIndex * sentencesPerPage, (currentPageIndex + 1) * sentencesPerPage)
                   .map((sentence, localIdx) => {
@@ -855,7 +1092,18 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                           isActive ? 'tts-highlight font-medium' : ''
                         }`}
                       >
-                        {sentence}{' '}
+                        {settings.bionicReading ? (
+                          sentence.split(' ').map((word, wIdx) => {
+                            const { bold, rest } = renderBionicWord(word);
+                            return (
+                              <React.Fragment key={wIdx}>
+                                <strong className="bionic-bold">{bold}</strong>{rest}{' '}
+                              </React.Fragment>
+                            );
+                          })
+                        ) : (
+                          <>{sentence} </>
+                        )}
                       </span>
                     );
                   })}
@@ -867,8 +1115,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   disabled={currentPageIndex === 0}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCurrentPageIndex(p => Math.max(0, p - 1));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    handlePageChange('prev');
                   }}
                   className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
                 >
@@ -883,8 +1130,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   disabled={currentPageIndex >= totalPages - 1}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCurrentPageIndex(p => Math.min(totalPages - 1, p + 1));
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    handlePageChange('next');
                   }}
                   className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
                 >
@@ -908,12 +1154,42 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                       isActive ? 'tts-highlight font-medium' : ''
                     }`}
                   >
-                    {sentence}{' '}
+                    {settings.bionicReading ? (
+                      sentence.split(' ').map((word, wIdx) => {
+                        const { bold, rest } = renderBionicWord(word);
+                        return (
+                          <React.Fragment key={wIdx}>
+                            <strong className="bionic-bold">{bold}</strong>{rest}{' '}
+                          </React.Fragment>
+                        );
+                      })
+                    ) : (
+                      <>{sentence} </>
+                    )}
                   </span>
                 );
               })}
             </div>
           )}
+
+          {/* Reading Ruler Focus Overlay */}
+          {settings.readingRuler && rulerY !== null && (
+            <div 
+              className="fixed inset-x-0 h-12 reading-ruler-guide z-20 pointer-events-none"
+              style={{ top: `${Math.max(60, rulerY - 24)}px` }}
+            />
+          )}
+
+          {/* Warm Eye-Care Amber Filter */}
+          {settings.warmthLevel && settings.warmthLevel > 0 ? (
+            <div
+              className="fixed inset-0 pointer-events-none z-30 transition-opacity"
+              style={{
+                backgroundColor: `rgba(251, 146, 60, ${Math.min(0.25, (settings.warmthLevel / 100) * 0.22)})`,
+                mixBlendMode: 'multiply'
+              }}
+            />
+          ) : null}
 
           {/* Chapter Bottom Navigation */}
           <div className="mt-16 pt-8 border-t border-current opacity-20 flex items-center justify-between gap-4">
@@ -921,8 +1197,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               disabled={currentChapterNumber <= 1}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectChapter(currentChapterNumber - 1);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                handleChapterChange(currentChapterNumber - 1);
               }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
             >
@@ -938,8 +1213,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               disabled={currentChapterNumber >= chapters.length}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelectChapter(currentChapterNumber + 1);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                handleChapterChange(currentChapterNumber + 1);
               }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
             >
@@ -1127,24 +1401,93 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               />
             </div>
 
+            {/* Tiện ích Đọc Cao Cấp */}
+            <div className="pt-3 border-t border-zinc-800 space-y-2.5">
+              <label className="text-[11px] font-bold text-amber-400 uppercase tracking-wider block">
+                ✨ Trải Nghiệm Cao Cấp
+              </label>
+
+              {/* Bionic Reading Toggle */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-zinc-200 font-medium block">Đọc nhanh Bionic</span>
+                  <span className="text-[10px] text-zinc-400">Tô đậm đầu từ giúp não lướt siêu tốc</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.bionicReading || false}
+                  onChange={(e) => onUpdateSettings({ bionicReading: e.target.checked })}
+                  className="w-4 h-4 rounded-sm accent-amber-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Reading Ruler Toggle */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-zinc-200 font-medium block">Thước kẻ tập trung</span>
+                  <span className="text-[10px] text-zinc-400">Dải dẫn hướng mắt không nhảy dòng</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.readingRuler || false}
+                  onChange={(e) => onUpdateSettings({ readingRuler: e.target.checked })}
+                  className="w-4 h-4 rounded-sm accent-amber-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Page Turn Sound */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-zinc-200 font-medium block">Âm thanh lật trang</span>
+                  <span className="text-[10px] text-zinc-400">Tiếng sột soạt giấy thật khi chuyển trang</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.pageTurnSound !== false}
+                  onChange={(e) => onUpdateSettings({ pageTurnSound: e.target.checked })}
+                  className="w-4 h-4 rounded-sm accent-amber-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Paper Texture */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-zinc-200 font-medium block">Vân giấy thủ công</span>
+                  <span className="text-[10px] text-zinc-400">Hiệu ứng xơ sợi tự nhiên, chống lóa mắt</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.paperTexture || false}
+                  onChange={(e) => onUpdateSettings({ paperTexture: e.target.checked })}
+                  className="w-4 h-4 rounded-sm accent-amber-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Eye-Care Warmth Slider */}
+              <div>
+                <div className="flex justify-between text-xs text-zinc-400 mb-1">
+                  <span>Ánh nến ấm (Lọc ánh sáng xanh)</span>
+                  <span className="font-semibold text-amber-400">{settings.warmthLevel || 0}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={settings.warmthLevel || 0}
+                  onChange={(e) => onUpdateSettings({ warmthLevel: Number(e.target.value) })}
+                  className="w-full accent-amber-500"
+                />
+              </div>
+            </div>
+
             {/* Offline Audio Download */}
             <div className="pt-2 border-t border-zinc-800">
               <button
-                disabled={isDownloadingAudio || sentences.length === 0}
-                onClick={handleDownloadChapterAudio}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-medium hover:bg-amber-500/30 transition-all cursor-pointer disabled:opacity-50"
+                onClick={() => setShowOfflineAudioModal(true)}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-medium hover:bg-amber-500/30 transition-all cursor-pointer"
               >
-                {isDownloadingAudio ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Đang tải audio ({audioDownloadProgress ? `${audioDownloadProgress.done}/${audioDownloadProgress.total}` : '...'})</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Tải Audio ngoại tuyến chương này</span>
-                  </>
-                )}
+                <Download className="w-3.5 h-3.5" />
+                <span>Tải Audio ngoại tuyến (AI Neural)</span>
               </button>
             </div>
 
@@ -1352,6 +1695,79 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         />
       )}
 
+      {/* Sino-Vietnamese & Web Novel Dictionary Modal */}
+      {showHanVietModal && (
+        <HanVietModal
+          isOpen={showHanVietModal}
+          onClose={() => setShowHanVietModal(false)}
+          initialQuery={hanVietQuery}
+        />
+      )}
+
+      {/* Floating Selection Toolbar */}
+      {floatingToolbarPos && selectedText && (
+        <div
+          style={{
+            top: `${floatingToolbarPos.top}px`,
+            left: `${floatingToolbarPos.left}px`,
+            position: 'fixed',
+            zIndex: 60
+          }}
+          className="flex items-center gap-1 p-1 bg-zinc-900/95 border border-zinc-700/80 shadow-2xl rounded-xl backdrop-blur-md animate-fade-in text-zinc-200 select-none"
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <button
+            onClick={() => handleOpenHanViet(selectedText)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-amber-500/20 text-xs font-medium text-amber-300 hover:text-amber-200 transition-colors cursor-pointer"
+            title="Tra cứu từ điển Hán Việt & Tu Tiên"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Tra từ</span>
+          </button>
+
+          <div className="w-[1px] h-4 bg-zinc-700/80" />
+
+          <button
+            onClick={() => handleOpenQuoteModal(selectedText)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-emerald-500/20 text-xs font-medium text-emerald-300 hover:text-emerald-200 transition-colors cursor-pointer"
+            title="Tạo ảnh trích dẫn nghệ thuật"
+          >
+            <Quote className="w-3.5 h-3.5" />
+            <span>Trích dẫn</span>
+          </button>
+
+          <div className="w-[1px] h-4 bg-zinc-700/80" />
+
+          <button
+            onClick={handlePlaySelectedText}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-indigo-500/20 text-xs font-medium text-indigo-300 hover:text-indigo-200 transition-colors cursor-pointer"
+            title="Đọc từ câu này bằng giọng AI"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            <span>Đọc</span>
+          </button>
+
+          <div className="w-[1px] h-4 bg-zinc-700/80" />
+
+          <button
+            onClick={handleCopySelectedText}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors cursor-pointer"
+            title="Sao chép đoạn đã chọn"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Chép</span>
+          </button>
+        </div>
+      )}
+
+      {/* Copied Toast */}
+      {copiedToast && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-zinc-900 border border-zinc-700 text-xs text-amber-300 rounded-full shadow-lg flex items-center gap-2 animate-fade-in pointer-events-none">
+          <Check className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Đã sao chép vào bộ nhớ tạm!</span>
+        </div>
+      )}
+
       {/* AI Story Recap & Chapter Summary Modal */}
       {showAiSummaryModal && currentChapter && (
         <AISummaryModal
@@ -1362,6 +1778,35 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           previousChapters={chapters.filter(c => c.chapterNumber < currentChapterNumber)}
         />
       )}
+
+      {/* Offline Audio Downloader Modal */}
+      {showOfflineAudioModal && (
+        <OfflineAudioModal
+          isOpen={showOfflineAudioModal}
+          onClose={() => setShowOfflineAudioModal(false)}
+          story={story}
+          currentChapterNumber={currentChapterNumber}
+          chapters={chapters}
+          onPlayChapter={(chNum) => onSelectChapter(chNum)}
+        />
+      )}
+
+      {/* Reading Stats & Streak Modal */}
+      {showStatsModal && (
+        <ReadingStatsModal
+          isOpen={showStatsModal}
+          onClose={() => setShowStatsModal(false)}
+        />
+      )}
+
+      {/* Interactive AI Story Companion Modal (Anti-Spoiler) */}
+      <StoryAiCompanionModal
+        isOpen={showAiCompanion}
+        onClose={() => setShowAiCompanion(false)}
+        story={story}
+        currentChapter={currentChapter}
+        recentChapters={chapters}
+      />
 
       {/* Mobile Tools Drawer / Bottom Sheet */}
       {showMoreToolsModal && (
@@ -1384,6 +1829,26 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             </div>
 
             <div className="space-y-1 pt-1">
+              {/* AI Novel Companion */}
+              <button
+                onClick={() => {
+                  setShowMoreToolsModal(false);
+                  setShowAiCompanion(true);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <Bot className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5">
+                    Đàm đạo cùng Trợ lý AI
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">Anti-Spoiler</span>
+                  </h4>
+                  <p className="text-[11px] text-zinc-400">Hỏi đáp tình tiết, cảnh giới không sợ lộ nội dung sau</p>
+                </div>
+              </button>
+
               {/* AI Recap */}
               <button
                 onClick={() => {
@@ -1435,6 +1900,40 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 </div>
               </button>
 
+              {/* Han-Viet Dictionary */}
+              <button
+                onClick={() => {
+                  setShowMoreToolsModal(false);
+                  handleOpenHanViet();
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <BookOpen className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-100">Từ điển Hán Việt & Tu Tiên</h4>
+                  <p className="text-[11px] text-zinc-400">Tra cứu cảnh giới, thuật ngữ tiên hiệp & chiết tự Hán Việt</p>
+                </div>
+              </button>
+
+              {/* Reading Stats & Streak */}
+              <button
+                onClick={() => {
+                  setShowMoreToolsModal(false);
+                  setShowStatsModal(true);
+                }}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 shrink-0">
+                  <Flame className="w-4.5 h-4.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-zinc-100">Thống kê thói quen đọc</h4>
+                  <p className="text-[11px] text-zinc-400">Theo dõi chuỗi ngày đọc (Streak) và thời gian đọc</p>
+                </div>
+              </button>
+
               {/* Check new chapters */}
               {story.sourceUrl && (
                 <button
@@ -1457,10 +1956,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
               {/* Download chapter audio */}
               <button
-                disabled={isDownloadingAudio || sentences.length === 0}
+                disabled={sentences.length === 0}
                 onClick={() => {
                   setShowMoreToolsModal(false);
-                  handleDownloadChapterAudio();
+                  setShowOfflineAudioModal(true);
                 }}
                 className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-zinc-800/80 transition-colors text-left cursor-pointer disabled:opacity-40"
               >

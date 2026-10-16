@@ -11,7 +11,12 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   readerMode: 'scroll',
   autoScroll: false,
   autoScrollSpeed: 3,
-  keepScreenAwake: true
+  keepScreenAwake: true,
+  bionicReading: false,
+  readingRuler: false,
+  pageTurnSound: true,
+  paperTexture: false,
+  warmthLevel: 0
 };
 
 export const DEFAULT_TTS_SETTINGS: TTSSettings = {
@@ -22,7 +27,11 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   sleepTimerMinutes: null,
   highlightSentence: true,
   autoNextChapter: true,
-  playAlongOtherApps: true
+  playAlongOtherApps: true,
+  multiVoiceDrama: false,
+  femaleVoiceURI: 'edge:vi-VN-HoaiMyNeural',
+  maleVoiceURI: 'edge:vi-VN-NamMinhNeural',
+  autoContextAmbient: false
 };
 
 export interface ChapterMetadata {

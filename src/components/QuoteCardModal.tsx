@@ -75,6 +75,12 @@ export const QuoteCardModal: React.FC<QuoteCardModalProps> = ({
   const [copied, setCopied] = useState(false);
   const cardPreviewRef = useRef<HTMLDivElement>(null);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setQuote(initialQuote);
+    }
+  }, [initialQuote, isOpen]);
+
   if (!isOpen) return null;
 
   const currentTheme = THEMES.find(t => t.id === selectedTheme) || THEMES[0];

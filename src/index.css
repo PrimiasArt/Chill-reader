@@ -63,3 +63,120 @@
   box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.35);
   transition: all 0.2s ease-in-out;
 }
+
+/* 3D Page Curl & Flip Animations */
+.perspective-container {
+  perspective: 1400px;
+}
+
+@keyframes pageFlipNext {
+  0% {
+    opacity: 0.5;
+    transform: rotateY(28deg) scale(0.97) translateX(12px);
+    box-shadow: -15px 0 25px rgba(0, 0, 0, 0.25);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateY(0deg) scale(1) translateX(0);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes pageFlipPrev {
+  0% {
+    opacity: 0.5;
+    transform: rotateY(-28deg) scale(0.97) translateX(-12px);
+    box-shadow: 15px 0 25px rgba(0, 0, 0, 0.25);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateY(0deg) scale(1) translateX(0);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+.animate-page-flip-next {
+  animation: pageFlipNext 0.32s cubic-bezier(0.2, 0, 0.2, 1) forwards;
+  transform-origin: left center;
+  backface-visibility: hidden;
+}
+
+.animate-page-flip-prev {
+  animation: pageFlipPrev 0.32s cubic-bezier(0.2, 0, 0.2, 1) forwards;
+  transform-origin: right center;
+  backface-visibility: hidden;
+}
+
+/* Luxury Paper Texture Grain Overlay */
+.paper-texture-overlay {
+  background-image: radial-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 0),
+                    radial-gradient(rgba(0, 0, 0, 0.02) 1px, transparent 0);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+/* Bionic Reading Typography */
+.bionic-bold {
+  font-weight: 700;
+  color: inherit;
+  opacity: 1;
+}
+
+/* Reading Ruler Guide */
+.reading-ruler-guide {
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(245, 158, 11, 0.08) 35%,
+    rgba(245, 158, 11, 0.18) 50%,
+    rgba(245, 158, 11, 0.08) 65%,
+    transparent 100%
+  );
+  border-top: 1px dashed rgba(245, 158, 11, 0.35);
+  border-bottom: 1px dashed rgba(245, 158, 11, 0.35);
+  transition: top 0.12s cubic-bezier(0.1, 0.9, 0.2, 1);
+}
+
+/* Boutique Wooden Bookshelf */
+.bookshelf-shelf {
+  position: relative;
+  background: linear-gradient(to bottom, #2b1f1d 0%, #1c1413 85%, #0f0b0a 100%);
+  border-top: 4px solid #4a3532;
+  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(255, 255, 255, 0.1);
+}
+
+.bookshelf-shelf::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.25), transparent);
+}
+
+/* 3D Realistic Book Spine */
+.book-spine-3d {
+  position: relative;
+  box-shadow: -4px 0 8px rgba(0, 0, 0, 0.45), 4px 4px 12px rgba(0, 0, 0, 0.6);
+  transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1), box-shadow 0.25s ease;
+}
+
+.book-spine-3d:hover {
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: -6px 0 14px rgba(0, 0, 0, 0.55), 8px 14px 24px rgba(0, 0, 0, 0.75);
+}
+
+.book-spine-3d::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  background: linear-gradient(to right, rgba(255, 255, 255, 0.2), rgba(0, 0, 0, 0.4));
+  pointer-events: none;
+  border-radius: 4px 0 0 4px;
+}
+

@@ -107,6 +107,7 @@ public class MediaPlaybackService extends Service {
     private HandlerThread playbackThread = null;
     private Handler playbackHandler = null;
     private int nativeConsecutiveErrors = 0;
+    private long lastPauseTimestamp = 0;
     private Runnable ttsWatchdogRunnable = null;
     private boolean isForegroundRunning = false;
 
@@ -1493,6 +1494,7 @@ public class MediaPlaybackService extends Service {
     public void pauseNativeTts(boolean bySystem) {
         sIsPlaying = false;
         pausedBySystem = bySystem;
+        lastPauseTimestamp = System.currentTimeMillis();
         cancelTtsWatchdog();
         stopSilentNativeAudio();
         if (onlinePlayer != null) {
@@ -1518,6 +1520,16 @@ public class MediaPlaybackService extends Service {
         startSilentNativeAudio();
         acquireLocks();
         sIsPlaying = true;
+
+        // Smart resume rewind: if paused for >= 20 seconds, rewind 1 sentence to restore context
+        long now = System.currentTimeMillis();
+        if (lastPauseTimestamp > 0 && (now - lastPauseTimestamp >= 20000L)) {
+            if (nativeSentenceIndex > 0) {
+                nativeSentenceIndex = Math.max(0, nativeSentenceIndex - 1);
+            }
+        }
+        lastPauseTimestamp = 0;
+
         if (isOnlineVoice(selectedVoiceName)) {
             if (onlinePlayer != null) {
                 try {
