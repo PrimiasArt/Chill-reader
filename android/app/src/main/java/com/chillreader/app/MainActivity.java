@@ -27,6 +27,8 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
+import android.util.Base64;
 import android.speech.tts.Voice;
 import java.util.Locale;
 import java.util.Set;
@@ -163,6 +165,10 @@ public class MainActivity extends BridgeActivity {
             try {
                 WebView webView = getBridge() != null ? getBridge().getWebView() : null;
                 if (webView != null) {
+                    try {
+                        webView.onResume();
+                        webView.resumeTimers();
+                    } catch (Throwable ignored) {}
                     webView.evaluateJavascript(js, null);
                 }
             } catch (Exception e) {
@@ -517,6 +523,66 @@ public class MainActivity extends BridgeActivity {
                 return prefs.getBoolean(MediaPlaybackService.PREF_PLAY_ALONG, true);
             } catch (Throwable t) {
                 return true;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean saveCachedSentenceAudio(String voice, float rate, float pitch, String text, String base64Data) {
+            try {
+                if (base64Data == null || base64Data.isEmpty() || text == null || text.isEmpty()) {
+                    return false;
+                }
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                File cacheDir = (service != null) ? new File(service.getCacheDir(), "tts_cache") : new File(getCacheDir(), "tts_cache");
+                if (!cacheDir.exists()) {
+                    cacheDir.mkdirs();
+                }
+                String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
+                String key = cleanVoice + "_" + rate + "_" + pitch + "_" + text;
+                MessageDigest digest = MessageDigest.getInstance("MD5");
+                digest.update(key.getBytes("UTF-8"));
+                byte[] hash = digest.digest();
+                StringBuilder hex = new StringBuilder();
+                for (byte b : hash) {
+                    String h = Integer.toHexString(0xFF & b);
+                    while (h.length() < 2) h = "0" + h;
+                    hex.append(h);
+                }
+                File targetFile = new File(cacheDir, "sent_" + hex.toString() + ".mp3");
+                byte[] audioBytes = Base64.decode(base64Data, Base64.DEFAULT);
+                if (audioBytes != null && audioBytes.length > 512) {
+                    FileOutputStream fos = new FileOutputStream(targetFile);
+                    fos.write(audioBytes);
+                    fos.flush();
+                    fos.close();
+                    return true;
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+            return false;
+        }
+
+        @JavascriptInterface
+        public boolean isSentenceAudioCached(String voice, float rate, float pitch, String text) {
+            try {
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                File cacheDir = (service != null) ? new File(service.getCacheDir(), "tts_cache") : new File(getCacheDir(), "tts_cache");
+                String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
+                String key = cleanVoice + "_" + rate + "_" + pitch + "_" + text;
+                MessageDigest digest = MessageDigest.getInstance("MD5");
+                digest.update(key.getBytes("UTF-8"));
+                byte[] hash = digest.digest();
+                StringBuilder hex = new StringBuilder();
+                for (byte b : hash) {
+                    String h = Integer.toHexString(0xFF & b);
+                    while (h.length() < 2) h = "0" + h;
+                    hex.append(h);
+                }
+                File targetFile = new File(cacheDir, "sent_" + hex.toString() + ".mp3");
+                return targetFile.exists() && targetFile.length() > 512;
+            } catch (Throwable t) {
+                return false;
             }
         }
 

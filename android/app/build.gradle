@@ -7,8 +7,8 @@ android {
         applicationId "com.chillreader.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        def vCode = 144
-        def vName = "1.0.44"
+        def vCode = 146
+        def vName = "1.0.46"
         def envVCode = System.getenv('APP_VERSION_CODE')
         def envVName = System.getenv('APP_VERSION_NAME')
         if (envVCode && envVName) {

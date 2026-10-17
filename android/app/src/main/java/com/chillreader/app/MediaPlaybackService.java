@@ -22,6 +22,10 @@ import android.media.AudioPlaybackConfiguration;
 import android.media.AudioTrack;
 import android.media.MediaPlayer;
 import android.media.PlaybackParams;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
@@ -240,12 +244,10 @@ public class MediaPlaybackService extends Service {
         mainHandler.post(() -> {
             try {
                 if (isNativeTtsMode) {
-                    if (isPlaying) {
-                        stopNativeTts();
-                        isNativeTtsMode = false;
-                    } else {
-                        return;
-                    }
+                    currentChapterTitle = chapterTitle;
+                    currentBookTitle = bookTitle;
+                    currentAuthor = author;
+                    return;
                 }
                 isNativeTtsMode = false;
                 currentChapterTitle = chapterTitle;
@@ -869,33 +871,91 @@ public class MediaPlaybackService extends Service {
     private void applySelectedVoice() {
         if (nativeTts == null || !isNativeTtsReady) return;
         try {
+            boolean voiceSet = false;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                Set<Voice> voices = null;
+                try {
+                    voices = nativeTts.getVoices();
+                } catch (Throwable ignored) {}
+
                 if (selectedVoiceName != null && !selectedVoiceName.trim().isEmpty()) {
                     String cleanVoiceName = selectedVoiceName.startsWith("native:") 
                         ? selectedVoiceName.substring(7) 
                         : selectedVoiceName;
                     
                     if (!cleanVoiceName.isEmpty() && !"android".equalsIgnoreCase(cleanVoiceName)) {
-                        Set<Voice> voices = nativeTts.getVoices();
                         if (voices != null) {
                             for (Voice v : voices) {
                                 if (v != null && (cleanVoiceName.equalsIgnoreCase(v.getName()) || 
                                                   cleanVoiceName.equalsIgnoreCase(v.getLocale().toLanguageTag()))) {
                                     nativeTts.setVoice(v);
-                                    return;
+                                    voiceSet = true;
+                                    break;
                                 }
                             }
                         }
                     }
                 }
+
+                // If user selected "native:android", or requested voice wasn't found:
+                // ALWAYS prioritize an OFFLINE voice (!isNetworkConnectionRequired()) for Vietnamese!
+                if (!voiceSet && voices != null) {
+                    Voice bestOfflineVoice = null;
+                    Voice fallbackNetworkVoice = null;
+                    for (Voice v : voices) {
+                        if (v == null || v.getLocale() == null) continue;
+                        String lang = v.getLocale().getLanguage();
+                        String tag = v.getLocale().toLanguageTag();
+                        if ("vi".equalsIgnoreCase(lang) || (tag != null && tag.toLowerCase(Locale.US).startsWith("vi"))) {
+                            if (!v.isNetworkConnectionRequired()) {
+                                bestOfflineVoice = v;
+                                break;
+                            } else if (fallbackNetworkVoice == null) {
+                                fallbackNetworkVoice = v;
+                            }
+                        }
+                    }
+                    if (bestOfflineVoice != null) {
+                        nativeTts.setVoice(bestOfflineVoice);
+                        voiceSet = true;
+                    } else if (fallbackNetworkVoice != null) {
+                        nativeTts.setVoice(fallbackNetworkVoice);
+                        voiceSet = true;
+                    }
+                }
             }
+
             // Fallback default Vietnamese locale
-            int result = nativeTts.setLanguage(new Locale("vi", "VN"));
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                nativeTts.setLanguage(new Locale("vi"));
+            if (!voiceSet) {
+                int result = nativeTts.setLanguage(new Locale("vi", "VN"));
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    nativeTts.setLanguage(new Locale("vi"));
+                }
             }
         } catch (Throwable t) {
             t.printStackTrace();
+        }
+    }
+
+    private boolean isNetworkConnected() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) return false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Network network = cm.getActiveNetwork();
+                if (network == null) return false;
+                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                return caps != null && (
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                );
+            } else {
+                NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+                return activeNetwork != null && activeNetwork.isConnected();
+            }
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -903,84 +963,84 @@ public class MediaPlaybackService extends Service {
         if (nativeTts != null) return;
         try {
             String bestEngine = findBestTtsEngine(getApplicationContext());
-            TextToSpeech.OnInitListener initListener = status -> {
-                if (status == TextToSpeech.SUCCESS) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        try {
-                            AudioAttributes aa = new AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_MEDIA)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build();
-                            nativeTts.setAudioAttributes(aa);
-                        } catch (Throwable ignored) {}
-                    }
+            TextToSpeech.OnInitListener initListener = new TextToSpeech.OnInitListener() {
+                @Override
+                public void onInit(int status) {
+                    if (status == TextToSpeech.SUCCESS) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            try {
+                                AudioAttributes aa = new AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                    .build();
+                                nativeTts.setAudioAttributes(aa);
+                            } catch (Throwable ignored) {}
+                        }
 
-                    isNativeTtsReady = true;
-                    applySelectedVoice();
+                        isNativeTtsReady = true;
+                        applySelectedVoice();
 
-                    nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                        @Override
-                        public void onStart(String utteranceId) {
-                            if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                return;
+                        nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                            @Override
+                            public void onStart(String utteranceId) {
+                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                    return;
+                                }
+                                getPlaybackHandler().post(() -> {
+                                    MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
+                                });
                             }
-                            getPlaybackHandler().post(() -> {
-                                MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
-                            });
-                        }
 
-                        @Override
-                        public void onDone(String utteranceId) {
-                            getPlaybackHandler().post(() -> {
-                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                    // Ignore stale callback from older utterance, DO NOT cancel current watchdog!
-                                    return;
-                                }
-                                cancelTtsWatchdog();
-                                if (!isNativeTtsMode || !sIsPlaying) return;
-                                nativeSentenceIndex++;
-                                playCurrentNativeSentence();
-                            });
-                        }
-
-                        @Override
-                        public void onError(String utteranceId) {
-                            getPlaybackHandler().post(() -> {
-                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                    return;
-                                }
-                                cancelTtsWatchdog();
-                                if (!isNativeTtsMode || !sIsPlaying) return;
-                                nativeSentenceIndex++;
-                                playCurrentNativeSentence();
-                            });
-                        }
-
-                        @Override
-                        public void onStop(String utteranceId, boolean interrupted) {
-                            getPlaybackHandler().post(() -> {
-                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                    return; // Stale stop event from previously flushed utterance: ignore!
-                                }
-                                cancelTtsWatchdog();
-                                if (!isNativeTtsMode || !sIsPlaying || pausedBySystem) return;
-
-                                // Interrupted mid-sentence by transient system event: advance cleanly to next sentence
-                                getPlaybackHandler().postDelayed(() -> {
-                                    if (isNativeTtsMode && sIsPlaying && !pausedBySystem) {
-                                        nativeSentenceIndex++;
-                                        playCurrentNativeSentence();
+                            @Override
+                            public void onDone(String utteranceId) {
+                                getPlaybackHandler().post(() -> {
+                                    if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                        return;
                                     }
-                                }, 250);
-                            });
-                        }
-                    });
+                                    cancelTtsWatchdog();
+                                    if (!isNativeTtsMode || !sIsPlaying) return;
+                                    nativeSentenceIndex++;
+                                    playCurrentNativeSentence();
+                                });
+                            }
 
-                    if (isNativeTtsMode && sIsPlaying) {
-                        getPlaybackHandler().post(() -> playCurrentNativeSentence());
+                            @Override
+                            public void onError(String utteranceId) {
+                                getPlaybackHandler().post(() -> {
+                                    if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                        return;
+                                    }
+                                    cancelTtsWatchdog();
+                                    if (!isNativeTtsMode || !sIsPlaying) return;
+                                    nativeSentenceIndex++;
+                                    playCurrentNativeSentence();
+                                });
+                            }
+
+                            @Override
+                            public void onStop(String utteranceId, boolean interrupted) {
+                                getPlaybackHandler().post(() -> {
+                                    if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                        return;
+                                    }
+                                    cancelTtsWatchdog();
+                                    // Do NOT auto-advance on onStop to prevent skipping sentences during pause or jump
+                                });
+                            }
+                        });
+
+                        if (isNativeTtsMode && sIsPlaying) {
+                            getPlaybackHandler().post(() -> playCurrentNativeSentence());
+                        }
+                    } else {
+                        isNativeTtsReady = false;
+                        // If specific engine failed to init, try system default
+                        if (bestEngine != null) {
+                            try {
+                                nativeTts = new TextToSpeech(getApplicationContext(), this);
+                            } catch (Throwable ignored) {}
+                        }
                     }
-                } else {
-                    isNativeTtsReady = false;
                 }
             };
 
@@ -1192,7 +1252,6 @@ public class MediaPlaybackService extends Service {
         }
 
         if (nativeSentenceIndex >= nativeSentences.size()) {
-            sIsPlaying = false;
             cancelTtsWatchdog();
             scheduleGracefulTeardown();
             MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeChapterComplete && window.ttsEngine.onNativeChapterComplete()");
@@ -1239,6 +1298,12 @@ public class MediaPlaybackService extends Service {
             return;
         }
 
+        if (!isNetworkConnected()) {
+            // No network connection: immediately fall back to native offline TTS!
+            speakSentenceWithNativeFallback(rawSentence, targetIndex, token);
+            return;
+        }
+
         onlineTtsExecutor.submit(() -> {
             if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
             boolean ok = downloadSentenceAudio(selectedVoiceName, nativeRate, nativePitch, rawSentence, cacheFile);
@@ -1247,6 +1312,60 @@ public class MediaPlaybackService extends Service {
             if (ok && cacheFile.exists() && cacheFile.length() > 512) {
                 playAudioFile(cacheFile, token, targetIndex);
             } else {
+                // Download failed: seamlessly fall back to native offline TTS so reading never stops!
+                speakSentenceWithNativeFallback(rawSentence, targetIndex, token);
+            }
+        });
+    }
+
+    private void speakSentenceWithNativeFallback(String sentence, int targetIndex, int token) {
+        mainHandler.post(() -> {
+            if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
+            if (nativeTts == null || !isNativeTtsReady) {
+                initNativeTts();
+                mainHandler.postDelayed(() -> {
+                    if (token == currentOnlineSentenceToken && isNativeTtsMode && sIsPlaying) {
+                        speakSentenceWithNativeFallback(sentence, targetIndex, token);
+                    }
+                }, 350);
+                return;
+            }
+
+            try {
+                applySelectedVoice();
+                nativeTts.setSpeechRate(nativeRate);
+                nativeTts.setPitch(nativePitch);
+
+                final String utteranceId = "fallback_utt_" + System.currentTimeMillis() + "_" + targetIndex;
+                currentSpeakingUtteranceId = utteranceId;
+
+                long estimatedMs = (long) ((sentence.length() / (10.0f * Math.max(0.5f, nativeRate))) * 1000L);
+                long watchdogTimeoutMs = Math.max(8000L, estimatedMs + 10000L);
+
+                int res;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    Bundle params = new Bundle();
+                    params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId);
+                    res = nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, params, utteranceId);
+                } else {
+                    java.util.HashMap<String, String> params = new java.util.HashMap<>();
+                    params.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId);
+                    params.put(TextToSpeech.Engine.KEY_PARAM_STREAM, String.valueOf(AudioManager.STREAM_MUSIC));
+                    res = nativeTts.speak(sentence, TextToSpeech.QUEUE_FLUSH, params);
+                }
+
+                if (res == TextToSpeech.SUCCESS) {
+                    scheduleTtsWatchdog(targetIndex, watchdogTimeoutMs);
+                } else {
+                    mainHandler.postDelayed(() -> {
+                        if (token == currentOnlineSentenceToken && isNativeTtsMode && sIsPlaying) {
+                            nativeSentenceIndex++;
+                            playCurrentNativeSentence();
+                        }
+                    }, 400);
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
                 mainHandler.postDelayed(() -> {
                     if (token == currentOnlineSentenceToken && isNativeTtsMode && sIsPlaying) {
                         nativeSentenceIndex++;
@@ -1359,7 +1478,6 @@ public class MediaPlaybackService extends Service {
         }
 
         if (nativeSentenceIndex >= nativeSentences.size()) {
-            sIsPlaying = false;
             cancelTtsWatchdog();
             scheduleGracefulTeardown();
             MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeChapterComplete && window.ttsEngine.onNativeChapterComplete()");

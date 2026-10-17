@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.45",
-  "versionCode": 145,
-  "buildTime": "2026-10-16T16:50:00Z",
+  "versionName": "1.0.46",
+  "versionCode": 146,
+  "buildTime": "2026-10-18T03:55:00Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "HEAD",
-  "releaseNotes": "Bản nâng cấp Giao Diện Chuyên Nghiệp (Professional UI) v1.0.45:\n• Banner Tiêu Điểm 'Tiếp tục đọc' (Hero Spotlight): Thẻ nổi bật đầu tủ sách với hiệu ứng hào quang mờ, bìa sách 3D, thanh tiến độ phát sáng và nút đọc tiếp tức thì.\n• Dock điều khiển đọc thông minh (Apple Books / Kindle Style): Thanh Dock nổi kính mờ ở đáy màn hình đọc với thanh trượt chuyển nhanh chương truyện, nút nghe audio phân vai, gọi AI chống spoil và mục lục.\n• Thanh đo tiến độ cuộn trang siêu mỏng: Dải sáng mạ vàng siêu mỏng ở đỉnh màn hình theo dõi chính xác % đọc của chương.\n• Trình phát Audio Mini Capsule: Hộp phát audio nổi phong cách viên nang kính mờ với sóng âm động nhảy theo nhịp đọc và thanh tiến độ mảnh viền trên.\n• Thanh điều hướng dưới đáy (Floating Bottom Dock): Thiết kế dock nổi bo cong mềm mại cho điện thoại.\n• Bộ lọc sắp xếp tủ sách: Phân loại theo Mới đọc gần đây, Tên A-Z, Tiến độ đọc cao nhất và Số chương."
+  "releaseNotes": "Bản cập nhật Sửa Lỗi Toàn Diện Âm Thanh Đọc Truyện (Audio Reliability & 100% Offline Fix) v1.0.46:\n• Phát Offline 100% không cần Internet: Đảm bảo giọng đọc offline (Google TTS / Thiết bị) hoạt động tuyệt đối ngay cả khi ngắt toàn bộ WiFi/4G, tự động ưu tiên giọng tiếng Việt không cần mạng và tự động chuyển giọng offline tức thì nếu tải audio mạng gián đoạn.\n• Không gián đoạn khi lật trang & chuyển trang: Khắc phục triệt để hiện tượng dừng audio do xung đột WebAudio Focus khi lật trang; giữ nguyên tiến trình đọc âm thanh liên tục xuyên suốt mọi thao tác lướt đọc.\n• Tự động chuyển chương mượt mà không dừng: Giữ vững Native Foreground Service & WakeLock khi hết chương, tự động truy xuất nội dung chương kế tiếp từ cơ sở dữ liệu IndexedDB và tiếp tục phát mượt mà không bị Android OS thu hồi quyền.\n• Đồng bộ bộ nhớ đệm Offline vào Native Disk: Toàn bộ âm thanh tải trước từ hộp thoại Tải Âm Thanh được tự động đồng bộ sang bộ nhớ tệp tin của Android, giúp phát offline mượt mà kể cả khi tắt màn hình."
 }

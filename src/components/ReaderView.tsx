@@ -329,7 +329,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   // Luxury page change with realistic page turn sound effect
   const handlePageChange = (direction: 'next' | 'prev') => {
-    if (settings.pageTurnSound !== false) {
+    if (settings.pageTurnSound !== false && ttsState !== 'playing') {
       ambientAudioService.playPageTurnSound();
     }
     setPageFlipDirection(direction);
@@ -343,7 +343,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   // Luxury chapter change with realistic sound effect
   const handleChapterChange = (chapterNumber: number) => {
-    if (settings.pageTurnSound !== false) {
+    if (settings.pageTurnSound !== false && ttsState !== 'playing') {
       ambientAudioService.playPageTurnSound();
     }
     onSelectChapter(chapterNumber);

@@ -166,7 +166,7 @@ export const App: React.FC = () => {
         if (ttsSettings.autoNextChapter && activeStory && activeStoryChapters.length > 0) {
           if (currentChapterNumber < activeStoryChapters.length) {
             const nextNum = currentChapterNumber + 1;
-            setCurrentChapterNumber(nextNum);
+            handleSelectChapter(nextNum, true);
           }
         }
       }
@@ -191,10 +191,14 @@ export const App: React.FC = () => {
 
       if (mode === 'listen') {
         setPlayingStory({ title: story.title, author: story.author, coverUrl: story.coverUrl });
-        const chapter = chapters.find(c => c.chapterNumber === startChapterNumber) || chapters[0];
+        let chapter = chapters.find(c => c.chapterNumber === startChapterNumber) || chapters[0];
+        if (chapter && (!chapter.content || chapter.content.trim().length === 0)) {
+          const full = await db.getChapter(story.id, chapter.chapterNumber);
+          if (full && full.content) chapter = full;
+        }
         if (chapter) {
           ttsEngine.loadChapter(
-            chapter.content,
+            chapter.content || '',
             {
               title: story.title,
               author: story.author,
@@ -240,10 +244,16 @@ export const App: React.FC = () => {
     setStories(prev => prev.map(s => s.id === activeStory.id ? updatedStory : s));
     supabaseSync.pushStoryProgress(updatedStory);
 
-    const chapter = activeStoryChapters.find(c => c.chapterNumber === chapterNumber);
+    let chapter = activeStoryChapters.find(c => c.chapterNumber === chapterNumber);
+    if (chapter && (!chapter.content || chapter.content.trim().length === 0)) {
+      const full = await db.getChapter(activeStory.id, chapterNumber);
+      if (full && full.content) {
+        chapter = full;
+      }
+    }
     if (chapter && (autoStartListen || ttsState === 'playing')) {
       ttsEngine.loadChapter(
-        chapter.content,
+        chapter.content || '',
         {
           title: activeStory.title,
           author: activeStory.author,
@@ -252,25 +262,34 @@ export const App: React.FC = () => {
           storyId: activeStory.id,
           chapterNumber: chapter.chapterNumber
         },
-        0
+        0,
+        true
       );
       ttsEngine.play();
     }
   };
 
   // Start TTS for current chapter
-  const handleStartTTS = () => {
+  const handleStartTTS = async () => {
     if (!activeStory) return;
     setPlayingStory({ title: activeStory.title, author: activeStory.author, coverUrl: activeStory.coverUrl });
-    const chapter = activeStoryChapters.find(c => c.chapterNumber === currentChapterNumber) || activeStoryChapters[0];
+    let chapter = activeStoryChapters.find(c => c.chapterNumber === currentChapterNumber) || activeStoryChapters[0];
+    if (chapter && (!chapter.content || chapter.content.trim().length === 0)) {
+      const full = await db.getChapter(activeStory.id, chapter.chapterNumber);
+      if (full && full.content) {
+        chapter = full;
+      }
+    }
     if (chapter) {
       ttsEngine.loadChapter(
-        chapter.content,
+        chapter.content || '',
         {
           title: activeStory.title,
           author: activeStory.author,
           chapterTitle: chapter.title,
-          coverUrl: activeStory.coverUrl
+          coverUrl: activeStory.coverUrl,
+          storyId: activeStory.id,
+          chapterNumber: chapter.chapterNumber
         },
         activeSentenceIndex || 0
       );

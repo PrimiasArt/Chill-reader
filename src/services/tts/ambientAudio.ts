@@ -126,6 +126,15 @@ class AmbientAudioService {
    */
   public playPageTurnSound(volumeMultiplier: number = 0.35) {
     try {
+      // If TTS is currently playing, NEVER play WebAudio page turn sound
+      // Because WebAudio output causes Android AudioManager to issue AUDIOFOCUS_LOSS and pause TTS!
+      if (typeof window !== 'undefined') {
+        const tts = (window as any).ttsEngine;
+        if (tts && typeof tts.getState === 'function' && tts.getState() === 'playing') {
+          return;
+        }
+      }
+
       this.initContext();
       if (!this.audioCtx) return;
       const ctx = this.audioCtx;

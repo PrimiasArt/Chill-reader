@@ -579,10 +579,42 @@ class TTSEngine {
       storyId?: string;
       chapterNumber?: number;
     },
-    startFromSentenceIndex: number = 0
+    startFromSentenceIndex: number = 0,
+    keepPlaying: boolean = false
   ) {
-    this.stop();
+    const wasPlaying = keepPlaying || this.state === 'playing';
+    this.playbackToken++;
+    this.playerLoadedSentenceIndex = [-1, -1];
     this.clearAudioBlobCache();
+
+    if (this.audioPlayers[0]) {
+      this.audioPlayers[0].onended = null;
+      this.audioPlayers[0].onerror = null;
+      this.audioPlayers[0].pause();
+      this.audioPlayers[0].src = '';
+    }
+    if (this.audioPlayers[1]) {
+      this.audioPlayers[1].onended = null;
+      this.audioPlayers[1].onerror = null;
+      this.audioPlayers[1].pause();
+      this.audioPlayers[1].src = '';
+    }
+    if (this.synth) {
+      if (this.currentUtterance) {
+        this.currentUtterance.onend = null;
+        this.currentUtterance.onerror = null;
+      }
+      this.synth.cancel();
+    }
+
+    if (!wasPlaying) {
+      const androidMedia = (window as any).AndroidMedia;
+      if (androidMedia && typeof androidMedia.stopNative === 'function') {
+        androidMedia.stopNative();
+      }
+      this.notifyState('idle');
+      this.clearNativeNotification();
+    }
 
     this.currentBookTitle = metadata.title;
     this.currentAuthor = metadata.author;
@@ -827,6 +859,21 @@ class TTSEngine {
     return `${getTtsApiBase()}/api/tts?voice=${encodeURIComponent(voice)}&rate=${serverRate}&pitch=${this.settings.pitch}&text=${encodeURIComponent(processedText)}`;
   }
 
+  public bridgeBlobToNativeDisk(voice: string, rate: number, pitch: number, text: string, blob: Blob) {
+    try {
+      const androidMedia = (window as any).AndroidMedia;
+      if (!androidMedia || typeof androidMedia.saveCachedSentenceAudio !== 'function') return;
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64data = (reader.result as string)?.split(',')[1];
+        if (base64data) {
+          androidMedia.saveCachedSentenceAudio(voice, rate, pitch, text, base64data);
+        }
+      };
+      reader.readAsDataURL(blob);
+    } catch {}
+  }
+
   /**
    * Preload all offline audio records for a chapter into in-memory Blob URL cache
    */
@@ -841,6 +888,15 @@ class TTSEngine {
       for (const rec of records) {
         if (!this.audioBlobCache.has(rec.sentenceIndex)) {
           this.audioBlobCache.set(rec.sentenceIndex, URL.createObjectURL(rec.audioBlob));
+        }
+        if (this.sentences[rec.sentenceIndex]) {
+          this.bridgeBlobToNativeDisk(
+            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.rate || 1.0,
+            this.settings.pitch || 1.0,
+            this.sentences[rec.sentenceIndex],
+            rec.audioBlob
+          );
         }
       }
     } catch (e) {
@@ -884,6 +940,13 @@ class TTSEngine {
       // Save to offline cache asynchronously
       if (this.currentStoryId) {
         db.saveOfflineAudio(this.currentStoryId, this.currentChapterNumber, index, blob).catch(() => {});
+        this.bridgeBlobToNativeDisk(
+          this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+          this.settings.rate || 1.0,
+          this.settings.pitch || 1.0,
+          text,
+          blob
+        );
       }
 
       const objectUrl = URL.createObjectURL(blob);
@@ -923,6 +986,13 @@ class TTSEngine {
         if (existing) {
           downloaded++;
           onProgress?.(downloaded, total);
+          this.bridgeBlobToNativeDisk(
+            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.rate || 1.0,
+            this.settings.pitch || 1.0,
+            list[i],
+            existing
+          );
           continue;
         }
 
@@ -932,6 +1002,13 @@ class TTSEngine {
         if (res.ok) {
           const blob = await res.blob();
           await db.saveOfflineAudio(storyId, chapterNumber, i, blob);
+          this.bridgeBlobToNativeDisk(
+            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.rate || 1.0,
+            this.settings.pitch || 1.0,
+            text,
+            blob
+          );
         }
       } catch (e: any) {
         if (signal?.aborted || e?.name === 'AbortError') {
@@ -1271,8 +1348,11 @@ class TTSEngine {
       const chapters = await db.getStoryChapters(this.currentStoryId);
       if (!chapters || chapters.length === 0) return false;
       const nextChapterNum = (this.currentChapterNumber || 1) + 1;
-      const nextChapter = chapters.find(c => c.chapterNumber === nextChapterNum);
+      let nextChapter = await db.getChapter(this.currentStoryId, nextChapterNum);
       if (!nextChapter) {
+        nextChapter = chapters.find(c => c.chapterNumber === nextChapterNum);
+      }
+      if (!nextChapter || !nextChapter.content || !nextChapter.content.trim()) {
         return false;
       }
 
@@ -1295,7 +1375,8 @@ class TTSEngine {
           storyId: this.currentStoryId,
           chapterNumber: nextChapter.chapterNumber
         },
-        0
+        0,
+        true
       );
       this.play();
       return true;
@@ -1312,8 +1393,11 @@ class TTSEngine {
       if (!chapters || chapters.length === 0) return false;
       const prevChapterNum = (this.currentChapterNumber || 1) - 1;
       if (prevChapterNum < 1) return false;
-      const prevChapter = chapters.find(c => c.chapterNumber === prevChapterNum);
+      let prevChapter = await db.getChapter(this.currentStoryId, prevChapterNum);
       if (!prevChapter) {
+        prevChapter = chapters.find(c => c.chapterNumber === prevChapterNum);
+      }
+      if (!prevChapter || !prevChapter.content || !prevChapter.content.trim()) {
         return false;
       }
 
@@ -1336,7 +1420,8 @@ class TTSEngine {
           storyId: this.currentStoryId,
           chapterNumber: prevChapter.chapterNumber
         },
-        0
+        0,
+        true
       );
       this.play();
       return true;
