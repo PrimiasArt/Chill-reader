@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.46",
-  "versionCode": 146,
-  "buildTime": "2026-10-18T03:55:00Z",
+  "versionName": "1.0.47",
+  "versionCode": 147,
+  "buildTime": "2026-10-21T00:05:00Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "HEAD",
-  "releaseNotes": "Bản cập nhật Sửa Lỗi Toàn Diện Âm Thanh Đọc Truyện (Audio Reliability & 100% Offline Fix) v1.0.46:\n• Phát Offline 100% không cần Internet: Đảm bảo giọng đọc offline (Google TTS / Thiết bị) hoạt động tuyệt đối ngay cả khi ngắt toàn bộ WiFi/4G, tự động ưu tiên giọng tiếng Việt không cần mạng và tự động chuyển giọng offline tức thì nếu tải audio mạng gián đoạn.\n• Không gián đoạn khi lật trang & chuyển trang: Khắc phục triệt để hiện tượng dừng audio do xung đột WebAudio Focus khi lật trang; giữ nguyên tiến trình đọc âm thanh liên tục xuyên suốt mọi thao tác lướt đọc.\n• Tự động chuyển chương mượt mà không dừng: Giữ vững Native Foreground Service & WakeLock khi hết chương, tự động truy xuất nội dung chương kế tiếp từ cơ sở dữ liệu IndexedDB và tiếp tục phát mượt mà không bị Android OS thu hồi quyền.\n• Đồng bộ bộ nhớ đệm Offline vào Native Disk: Toàn bộ âm thanh tải trước từ hộp thoại Tải Âm Thanh được tự động đồng bộ sang bộ nhớ tệp tin của Android, giúp phát offline mượt mà kể cả khi tắt màn hình."
+  "releaseNotes": "Bản cập nhật Sửa Triệt Để Lỗi Âm Thanh Offline & Ngừng Bất Chợt (Audio Reliability & Zero-Stall Offline Fix) v1.0.47:\n• Khắc phục 100% tình trạng mất tiếng khi không có mạng: Cơ chế Multi-Key Offline Cache thông minh (Exact key, Normalized speed key, và Text Fallback key) đảm bảo mọi âm thanh đã tải trước từ tính năng 'Tải Âm Thanh' hoặc nghe trước đó đều phát mượt mà không cần mạng, bất kể đổi giọng hay đổi tốc độ đọc.\n• Tự động lọc giọng Google Voice khi ngắt mạng: Nhận diện chính xác giọng cần mạng hay đã có gói offline trong máy, tự động chuyển đổi sang giọng offline cục bộ, tránh hoàn toàn lỗi câm tiếng khi không có mạng.\n• Khắc phục triệt để hiện tượng dừng audio bất chợt khi chuyển trang hoặc chuyển chương: Xóa bỏ xung đột cuộc gọi kép (race-condition) giữa advanceToNextChapter và onChapterComplete, loại bỏ kiểm tra utteranceId cứng nhắc trên các dòng máy Samsung/Xiaomi/Tecno, bổ sung cơ chế tự phục hồi sau 300ms khi TTS bị gián đoạn ngoài ý muốn do tắt màn hình hoặc chuyển trang."
 }

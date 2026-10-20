@@ -47,6 +47,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.InputStream;
@@ -377,7 +378,9 @@ public class MediaPlaybackService extends Service {
                 service.currentChapterTitle = chapterTitle;
                 service.currentBookTitle = bookTitle;
                 service.currentAuthor = author;
-                service.loadAndStartNativeQueue(sentencesJson, startIndex, rate, pitch, coverUrl, voiceURI);
+                service.mainHandler.post(() -> {
+                    service.loadAndStartNativeQueue(sentencesJson, startIndex, rate, pitch, coverUrl, voiceURI);
+                });
                 return;
             }
 
@@ -872,6 +875,7 @@ public class MediaPlaybackService extends Service {
         if (nativeTts == null || !isNativeTtsReady) return;
         try {
             boolean voiceSet = false;
+            boolean isOffline = !isNetworkConnected();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 Set<Voice> voices = null;
                 try {
@@ -888,6 +892,9 @@ public class MediaPlaybackService extends Service {
                             for (Voice v : voices) {
                                 if (v != null && (cleanVoiceName.equalsIgnoreCase(v.getName()) || 
                                                   cleanVoiceName.equalsIgnoreCase(v.getLocale().toLanguageTag()))) {
+                                    if (isOffline && v.isNetworkConnectionRequired()) {
+                                        continue;
+                                    }
                                     nativeTts.setVoice(v);
                                     voiceSet = true;
                                     break;
@@ -897,7 +904,7 @@ public class MediaPlaybackService extends Service {
                     }
                 }
 
-                // If user selected "native:android", or requested voice wasn't found:
+                // If user selected "native:android", or requested voice wasn't found or requires network while offline:
                 // ALWAYS prioritize an OFFLINE voice (!isNetworkConnectionRequired()) for Vietnamese!
                 if (!voiceSet && voices != null) {
                     Voice bestOfflineVoice = null;
@@ -910,7 +917,7 @@ public class MediaPlaybackService extends Service {
                             if (!v.isNetworkConnectionRequired()) {
                                 bestOfflineVoice = v;
                                 break;
-                            } else if (fallbackNetworkVoice == null) {
+                            } else if (fallbackNetworkVoice == null && !isOffline) {
                                 fallbackNetworkVoice = v;
                             }
                         }
@@ -983,9 +990,7 @@ public class MediaPlaybackService extends Service {
                         nativeTts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                             @Override
                             public void onStart(String utteranceId) {
-                                if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                    return;
-                                }
+                                nativeConsecutiveErrors = 0;
                                 getPlaybackHandler().post(() -> {
                                     MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
                                 });
@@ -994,10 +999,8 @@ public class MediaPlaybackService extends Service {
                             @Override
                             public void onDone(String utteranceId) {
                                 getPlaybackHandler().post(() -> {
-                                    if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                        return;
-                                    }
                                     cancelTtsWatchdog();
+                                    nativeConsecutiveErrors = 0;
                                     if (!isNativeTtsMode || !sIsPlaying) return;
                                     nativeSentenceIndex++;
                                     playCurrentNativeSentence();
@@ -1007,9 +1010,6 @@ public class MediaPlaybackService extends Service {
                             @Override
                             public void onError(String utteranceId) {
                                 getPlaybackHandler().post(() -> {
-                                    if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                        return;
-                                    }
                                     cancelTtsWatchdog();
                                     if (!isNativeTtsMode || !sIsPlaying) return;
                                     nativeSentenceIndex++;
@@ -1020,11 +1020,18 @@ public class MediaPlaybackService extends Service {
                             @Override
                             public void onStop(String utteranceId, boolean interrupted) {
                                 getPlaybackHandler().post(() -> {
-                                    if (utteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
-                                        return;
-                                    }
                                     cancelTtsWatchdog();
-                                    // Do NOT auto-advance on onStop to prevent skipping sentences during pause or jump
+                                    // If sIsPlaying is still true and we were NOT paused by system or user,
+                                    // this was an unexpected engine abort/interruption (e.g. screen off, transient audio routing).
+                                    // Recover after a brief debounce so playback never freezes!
+                                    if (sIsPlaying && !pausedBySystem && isNativeTtsMode) {
+                                        final int currentIndex = nativeSentenceIndex;
+                                        getPlaybackHandler().postDelayed(() -> {
+                                            if (sIsPlaying && !pausedBySystem && isNativeTtsMode && nativeSentenceIndex == currentIndex) {
+                                                playCurrentNativeSentence();
+                                            }
+                                        }, 300);
+                                    }
                                 });
                             }
                         });
@@ -1077,6 +1084,13 @@ public class MediaPlaybackService extends Service {
             startSilentNativeAudio();
             acquireLocks();
 
+            if (onlinePlayer != null) {
+                try { onlinePlayer.reset(); } catch (Throwable ignored) {}
+            }
+            if (nativeTts != null) {
+                try { nativeTts.stop(); } catch (Throwable ignored) {}
+            }
+
             if (isOnlineVoice(selectedVoiceName)) {
                 if (nativeTts != null) {
                     try { nativeTts.stop(); } catch (Throwable ignored) {}
@@ -1119,14 +1133,40 @@ public class MediaPlaybackService extends Service {
         }
     }
 
+    private void copyFile(File src, File dst) {
+        try (FileInputStream in = new FileInputStream(src);
+             FileOutputStream out = new FileOutputStream(dst)) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+            out.flush();
+        } catch (Throwable ignored) {}
+    }
+
     private File getCacheFileForSentence(String voice, float rate, float pitch, String text) {
         File cacheDir = new File(getCacheDir(), "tts_cache");
         if (!cacheDir.exists()) {
             cacheDir.mkdirs();
         }
         String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
-        String key = cleanVoice + "_" + rate + "_" + pitch + "_" + text;
-        return new File(cacheDir, "sent_" + md5(key) + ".mp3");
+
+        // 1. Exact match with voice, rate, pitch
+        File f1 = new File(cacheDir, "sent_" + md5(cleanVoice + "_" + rate + "_" + pitch + "_" + text) + ".mp3");
+        if (f1.exists() && f1.length() > 512) return f1;
+
+        // 2. Normalized match (1.0 rate & pitch) so audio downloaded at normal speed plays at any rate
+        File f2 = new File(cacheDir, "sent_" + md5(cleanVoice + "_1.0_1.0_" + text) + ".mp3");
+        if (f2.exists() && f2.length() > 512) return f2;
+
+        // 3. Text fallback match (any pre-downloaded sentence)
+        if (text != null && !text.trim().isEmpty()) {
+            File f3 = new File(cacheDir, "sent_txt_" + md5(text.trim()) + ".mp3");
+            if (f3.exists() && f3.length() > 512) return f3;
+        }
+
+        return f1;
     }
 
     private void cleanOldTtsCache() {
@@ -1175,7 +1215,7 @@ public class MediaPlaybackService extends Service {
         InputStream in = null;
         FileOutputStream out = null;
 
-        for (int attempt = 0; attempt < 3; attempt++) {
+        for (int attempt = 0; attempt < 2; attempt++) {
             try {
                 String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
                 float serverRate = cleanVoice.startsWith("google") ? 1.0f : Math.min(2.0f, Math.max(0.5f, rate));
@@ -1189,8 +1229,8 @@ public class MediaPlaybackService extends Service {
                 URL url = new URL(urlStr);
                 conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(12000);
+                conn.setConnectTimeout(4000);
+                conn.setReadTimeout(6000);
                 conn.setRequestProperty("User-Agent", "ChillReader-Android/1.0");
 
                 int code = conn.getResponseCode();
@@ -1210,11 +1250,20 @@ public class MediaPlaybackService extends Service {
 
                     if (tempFile.length() > 512) {
                         if (destFile.exists()) destFile.delete();
-                        return tempFile.renameTo(destFile);
+                        boolean ok = tempFile.renameTo(destFile);
+                        if (ok && text != null && !text.trim().isEmpty()) {
+                            try {
+                                File textFallback = new File(destFile.getParentFile(), "sent_txt_" + md5(text.trim()) + ".mp3");
+                                if (!textFallback.exists() || textFallback.length() <= 512) {
+                                    copyFile(destFile, textFallback);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                        return ok;
                     }
                 }
             } catch (Throwable t) {
-                try { Thread.sleep(250); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(200); } catch (InterruptedException ignored) {}
             } finally {
                 try { if (in != null) in.close(); } catch (Throwable ignored) {}
                 try { if (out != null) out.close(); } catch (Throwable ignored) {}
@@ -1404,6 +1453,7 @@ public class MediaPlaybackService extends Service {
                     mainHandler.post(() -> {
                         if (token != currentOnlineSentenceToken || !isNativeTtsMode || !sIsPlaying) return;
                         cancelTtsWatchdog();
+                        nativeConsecutiveErrors = 0;
                         nativeSentenceIndex++;
                         playCurrentNativeSentence();
                     });
@@ -1462,16 +1512,6 @@ public class MediaPlaybackService extends Service {
         cancelTtsWatchdog();
         if (!isNativeTtsMode || !sIsPlaying) return;
 
-        if (isOnlineVoice(selectedVoiceName)) {
-            playCurrentOnlineSentence();
-            return;
-        }
-
-        if (nativeTts == null || !isNativeTtsReady) {
-            initNativeTts();
-            return;
-        }
-
         // Skip non-readable / punctuation-only sentences to avoid TTS stall
         while (nativeSentenceIndex < nativeSentences.size() && !hasReadableText(nativeSentences.get(nativeSentenceIndex))) {
             nativeSentenceIndex++;
@@ -1484,9 +1524,50 @@ public class MediaPlaybackService extends Service {
             return;
         }
 
-        currentSentenceIndex = nativeSentenceIndex;
-        currentTotalSentences = nativeSentences.size();
+        final int targetIndex = nativeSentenceIndex;
+        final String rawSentence = nativeSentences.get(targetIndex);
 
+        // 1. ALWAYS check disk cache FIRST for pre-downloaded or cached audio!
+        // Works 100% offline regardless of selected voice or network availability!
+        File cacheFile = getCacheFileForSentence(selectedVoiceName, nativeRate, nativePitch, rawSentence);
+        if (cacheFile != null && cacheFile.exists() && cacheFile.length() > 512) {
+            currentSentenceIndex = targetIndex;
+            currentTotalSentences = nativeSentences.size();
+            acquireLocks();
+            if (!isForegroundRunning) {
+                renderNotificationAndForeground(true, lastCoverUrl);
+            }
+            MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + targetIndex + ")");
+            final int token = ++currentOnlineSentenceToken;
+            playAudioFile(cacheFile, token, targetIndex);
+            return;
+        }
+
+        // 2. If online voice, download & stream or fall back to native TTS
+        if (isOnlineVoice(selectedVoiceName)) {
+            playCurrentOnlineSentence();
+            return;
+        }
+
+        // 3. Native TTS playback
+        speakNativeSentenceDirect(rawSentence, targetIndex);
+    }
+
+    private void speakNativeSentenceDirect(final String sentence, final int targetIndex) {
+        if (!isNativeTtsMode || !sIsPlaying) return;
+
+        if (nativeTts == null || !isNativeTtsReady) {
+            initNativeTts();
+            mainHandler.postDelayed(() -> {
+                if (isNativeTtsMode && sIsPlaying && nativeSentenceIndex == targetIndex) {
+                    speakNativeSentenceDirect(sentence, targetIndex);
+                }
+            }, 350);
+            return;
+        }
+
+        currentSentenceIndex = targetIndex;
+        currentTotalSentences = nativeSentences.size();
         acquireLocks();
 
         if (!isForegroundRunning) {
@@ -1513,11 +1594,11 @@ public class MediaPlaybackService extends Service {
         }
 
         try {
+            applySelectedVoice();
             nativeTts.setSpeechRate(nativeRate);
             nativeTts.setPitch(nativePitch);
-            String sentence = nativeSentences.get(nativeSentenceIndex);
 
-            final String utteranceId = "utt_" + System.currentTimeMillis() + "_" + nativeSentenceIndex;
+            final String utteranceId = "utt_" + System.currentTimeMillis() + "_" + targetIndex;
             currentSpeakingUtteranceId = utteranceId;
 
             long estimatedMs = (long) ((sentence.length() / (10.0f * Math.max(0.5f, nativeRate))) * 1000L);
@@ -1545,14 +1626,14 @@ public class MediaPlaybackService extends Service {
                     return;
                 }
                 getPlaybackHandler().postDelayed(() -> {
-                    if (isNativeTtsMode && sIsPlaying) {
+                    if (isNativeTtsMode && sIsPlaying && nativeSentenceIndex == targetIndex) {
                         nativeSentenceIndex++;
                         playCurrentNativeSentence();
                     }
                 }, 350);
             } else {
                 nativeConsecutiveErrors = 0;
-                scheduleTtsWatchdog(nativeSentenceIndex, watchdogTimeoutMs);
+                scheduleTtsWatchdog(targetIndex, watchdogTimeoutMs);
             }
         } catch (Throwable t) {
             t.printStackTrace();
@@ -1565,14 +1646,14 @@ public class MediaPlaybackService extends Service {
                 return;
             }
             getPlaybackHandler().postDelayed(() -> {
-                if (isNativeTtsMode && sIsPlaying) {
+                if (isNativeTtsMode && sIsPlaying && nativeSentenceIndex == targetIndex) {
                     nativeSentenceIndex++;
                     playCurrentNativeSentence();
                 }
             }, 350);
         }
 
-        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + nativeSentenceIndex + ")");
+        MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.onNativeSentenceIndex && window.ttsEngine.onNativeSentenceIndex(" + targetIndex + ")");
     }
 
     private void scheduleTtsWatchdog(final int sentenceIndex, long timeoutMs) {

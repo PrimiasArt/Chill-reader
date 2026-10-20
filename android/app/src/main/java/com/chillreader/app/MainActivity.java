@@ -285,16 +285,42 @@ public class MainActivity extends BridgeActivity {
                 result.put("engine", currentEngine != null ? currentEngine : "");
 
                 if (tts != null && isNativeTtsReady) {
+                    boolean hasOfflineVoice = false;
+                    boolean hasNetworkVoice = false;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        try {
+                            Set<Voice> voices = tts.getVoices();
+                            if (voices != null) {
+                                for (Voice v : voices) {
+                                    if (v != null && v.getLocale() != null) {
+                                        String lang = v.getLocale().getLanguage();
+                                        if ("vi".equalsIgnoreCase(lang)) {
+                                            if (!v.isNetworkConnectionRequired()) {
+                                                hasOfflineVoice = true;
+                                            } else {
+                                                hasNetworkVoice = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+
                     int status = tts.isLanguageAvailable(new Locale("vi", "VN"));
-                    if (status == TextToSpeech.LANG_AVAILABLE || status == TextToSpeech.LANG_COUNTRY_AVAILABLE || status == TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE) {
-                        result.put("status", "available");
-                    } else if (status == TextToSpeech.LANG_MISSING_DATA) {
-                        result.put("status", "missing_data");
-                    } else {
+                    if (status < 0 && status != TextToSpeech.LANG_MISSING_DATA) {
                         result.put("status", "not_supported");
+                        result.put("hasOfflineVoice", false);
+                    } else if (hasOfflineVoice) {
+                        result.put("status", "available");
+                        result.put("hasOfflineVoice", true);
+                    } else {
+                        result.put("status", "missing_offline_data");
+                        result.put("hasOfflineVoice", false);
                     }
                 } else {
                     result.put("status", "not_ready");
+                    result.put("hasOfflineVoice", false);
                 }
             } catch (Throwable t) {
                 try { result.put("status", "error"); } catch (Throwable ignored) {}
@@ -437,18 +463,20 @@ public class MainActivity extends BridgeActivity {
             String voiceURI
         ) {
             try {
-                MediaPlaybackService.startNativeQueue(
-                    MainActivity.this,
-                    chapterTitle,
-                    bookTitle,
-                    author,
-                    coverUrl,
-                    sentencesJson,
-                    startIndex,
-                    rate,
-                    pitch,
-                    voiceURI
-                );
+                runOnUiThread(() -> {
+                    MediaPlaybackService.startNativeQueue(
+                        MainActivity.this,
+                        chapterTitle,
+                        bookTitle,
+                        author,
+                        coverUrl,
+                        sentencesJson,
+                        startIndex,
+                        rate,
+                        pitch,
+                        voiceURI
+                    );
+                });
             } catch (Throwable t) {
                 t.printStackTrace();
             }
@@ -526,21 +554,10 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
-        @JavascriptInterface
-        public boolean saveCachedSentenceAudio(String voice, float rate, float pitch, String text, String base64Data) {
+        private String md5(String s) {
             try {
-                if (base64Data == null || base64Data.isEmpty() || text == null || text.isEmpty()) {
-                    return false;
-                }
-                MediaPlaybackService service = MediaPlaybackService.getInstance();
-                File cacheDir = (service != null) ? new File(service.getCacheDir(), "tts_cache") : new File(getCacheDir(), "tts_cache");
-                if (!cacheDir.exists()) {
-                    cacheDir.mkdirs();
-                }
-                String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
-                String key = cleanVoice + "_" + rate + "_" + pitch + "_" + text;
                 MessageDigest digest = MessageDigest.getInstance("MD5");
-                digest.update(key.getBytes("UTF-8"));
+                digest.update(s.getBytes("UTF-8"));
                 byte[] hash = digest.digest();
                 StringBuilder hex = new StringBuilder();
                 for (byte b : hash) {
@@ -548,15 +565,45 @@ public class MainActivity extends BridgeActivity {
                     while (h.length() < 2) h = "0" + h;
                     hex.append(h);
                 }
-                File targetFile = new File(cacheDir, "sent_" + hex.toString() + ".mp3");
-                byte[] audioBytes = Base64.decode(base64Data, Base64.DEFAULT);
-                if (audioBytes != null && audioBytes.length > 512) {
-                    FileOutputStream fos = new FileOutputStream(targetFile);
-                    fos.write(audioBytes);
-                    fos.flush();
-                    fos.close();
-                    return true;
+                return hex.toString();
+            } catch (Throwable t) {
+                return String.valueOf(Math.abs(s.hashCode()));
+            }
+        }
+
+        private void writeFileBytes(File file, byte[] data) {
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(data);
+                fos.flush();
+            } catch (Throwable ignored) {}
+        }
+
+        @JavascriptInterface
+        public boolean saveCachedSentenceAudio(String voice, float rate, float pitch, String text, String base64Data) {
+            try {
+                if (base64Data == null || base64Data.isEmpty() || text == null || text.trim().isEmpty()) {
+                    return false;
                 }
+                MediaPlaybackService service = MediaPlaybackService.getInstance();
+                File cacheDir = (service != null) ? new File(service.getCacheDir(), "tts_cache") : new File(getCacheDir(), "tts_cache");
+                if (!cacheDir.exists()) {
+                    cacheDir.mkdirs();
+                }
+                byte[] audioBytes = Base64.decode(base64Data, Base64.DEFAULT);
+                if (audioBytes == null || audioBytes.length <= 512) {
+                    return false;
+                }
+
+                String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
+                String trimmed = text.trim();
+
+                // 1. Exact key with voice, rate, pitch
+                writeFileBytes(new File(cacheDir, "sent_" + md5(cleanVoice + "_" + rate + "_" + pitch + "_" + text) + ".mp3"), audioBytes);
+                // 2. Normalized key (1.0 rate & pitch) so playback at any speed matches
+                writeFileBytes(new File(cacheDir, "sent_" + md5(cleanVoice + "_1.0_1.0_" + text) + ".mp3"), audioBytes);
+                // 3. Text-only key (fallback for any voice / rate)
+                writeFileBytes(new File(cacheDir, "sent_txt_" + md5(trimmed) + ".mp3"), audioBytes);
+                return true;
             } catch (Throwable t) {
                 t.printStackTrace();
             }
@@ -566,24 +613,24 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public boolean isSentenceAudioCached(String voice, float rate, float pitch, String text) {
             try {
+                if (text == null || text.trim().isEmpty()) return false;
                 MediaPlaybackService service = MediaPlaybackService.getInstance();
                 File cacheDir = (service != null) ? new File(service.getCacheDir(), "tts_cache") : new File(getCacheDir(), "tts_cache");
+                if (!cacheDir.exists()) return false;
+
                 String cleanVoice = (voice != null && !voice.isEmpty()) ? voice : "edge:vi-VN-NamMinhNeural";
-                String key = cleanVoice + "_" + rate + "_" + pitch + "_" + text;
-                MessageDigest digest = MessageDigest.getInstance("MD5");
-                digest.update(key.getBytes("UTF-8"));
-                byte[] hash = digest.digest();
-                StringBuilder hex = new StringBuilder();
-                for (byte b : hash) {
-                    String h = Integer.toHexString(0xFF & b);
-                    while (h.length() < 2) h = "0" + h;
-                    hex.append(h);
-                }
-                File targetFile = new File(cacheDir, "sent_" + hex.toString() + ".mp3");
-                return targetFile.exists() && targetFile.length() > 512;
+                File f1 = new File(cacheDir, "sent_" + md5(cleanVoice + "_" + rate + "_" + pitch + "_" + text) + ".mp3");
+                if (f1.exists() && f1.length() > 512) return true;
+
+                File f2 = new File(cacheDir, "sent_" + md5(cleanVoice + "_1.0_1.0_" + text) + ".mp3");
+                if (f2.exists() && f2.length() > 512) return true;
+
+                File f3 = new File(cacheDir, "sent_txt_" + md5(text.trim()) + ".mp3");
+                if (f3.exists() && f3.length() > 512) return true;
             } catch (Throwable t) {
-                return false;
+                t.printStackTrace();
             }
+            return false;
         }
 
         @JavascriptInterface

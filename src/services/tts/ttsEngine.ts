@@ -355,9 +355,11 @@ class TTSEngine {
                 name: `Google Tiếng Việt (${isMale ? 'Nam' : 'Nữ'} #${idx + 1})`,
                 category: 'native',
                 gender: isMale ? 'male' : 'female',
-                badge: isOffline ? '100% Offline · Máy' : 'Thiết bị',
-                description: `Giọng đọc Android (${nv.name}) - Hoạt động ngoại tuyến không cần mạng`,
-                isOnline: false
+                badge: isOffline ? '100% Offline · Máy' : 'Cần mạng (Google)',
+                description: isOffline
+                  ? `Giọng đọc Android (${nv.name}) - Hoạt động ngoại tuyến không cần mạng`
+                  : `Giọng đọc Google (${nv.name}) - Cần mạng Internet hoặc tải gói ngoại tuyến trong Cài đặt máy`,
+                isOnline: !isOffline
               });
             });
           }
@@ -890,13 +892,24 @@ class TTSEngine {
           this.audioBlobCache.set(rec.sentenceIndex, URL.createObjectURL(rec.audioBlob));
         }
         if (this.sentences[rec.sentenceIndex]) {
+          const rawText = this.sentences[rec.sentenceIndex];
+          const processedText = pronunciationService.applyRules(rawText);
           this.bridgeBlobToNativeDisk(
             this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
             this.settings.rate || 1.0,
             this.settings.pitch || 1.0,
-            this.sentences[rec.sentenceIndex],
+            rawText,
             rec.audioBlob
           );
+          if (processedText !== rawText) {
+            this.bridgeBlobToNativeDisk(
+              this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+              this.settings.rate || 1.0,
+              this.settings.pitch || 1.0,
+              processedText,
+              rec.audioBlob
+            );
+          }
         }
       }
     } catch (e) {
@@ -940,6 +953,7 @@ class TTSEngine {
       // Save to offline cache asynchronously
       if (this.currentStoryId) {
         db.saveOfflineAudio(this.currentStoryId, this.currentChapterNumber, index, blob).catch(() => {});
+        const processedText = pronunciationService.applyRules(text);
         this.bridgeBlobToNativeDisk(
           this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
           this.settings.rate || 1.0,
@@ -947,6 +961,15 @@ class TTSEngine {
           text,
           blob
         );
+        if (processedText !== text) {
+          this.bridgeBlobToNativeDisk(
+            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.rate || 1.0,
+            this.settings.pitch || 1.0,
+            processedText,
+            blob
+          );
+        }
       }
 
       const objectUrl = URL.createObjectURL(blob);
@@ -986,13 +1009,24 @@ class TTSEngine {
         if (existing) {
           downloaded++;
           onProgress?.(downloaded, total);
+          const rawText = list[i];
+          const processedText = pronunciationService.applyRules(rawText);
           this.bridgeBlobToNativeDisk(
             this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
             this.settings.rate || 1.0,
             this.settings.pitch || 1.0,
-            list[i],
+            rawText,
             existing
           );
+          if (processedText !== rawText) {
+            this.bridgeBlobToNativeDisk(
+              this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+              this.settings.rate || 1.0,
+              this.settings.pitch || 1.0,
+              processedText,
+              existing
+            );
+          }
           continue;
         }
 
@@ -1002,13 +1036,24 @@ class TTSEngine {
         if (res.ok) {
           const blob = await res.blob();
           await db.saveOfflineAudio(storyId, chapterNumber, i, blob);
+          const rawText = text;
+          const processedText = pronunciationService.applyRules(rawText);
           this.bridgeBlobToNativeDisk(
             this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
             this.settings.rate || 1.0,
             this.settings.pitch || 1.0,
-            text,
+            rawText,
             blob
           );
+          if (processedText !== rawText) {
+            this.bridgeBlobToNativeDisk(
+              this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+              this.settings.rate || 1.0,
+              this.settings.pitch || 1.0,
+              processedText,
+              blob
+            );
+          }
         }
       } catch (e: any) {
         if (signal?.aborted || e?.name === 'AbortError') {

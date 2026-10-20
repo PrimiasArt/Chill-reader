@@ -177,3 +177,30 @@ test('Smart Resume Rewind - Rewinds 1 sentence if paused >= 20s, preserves if < 
   // Paused for 25 seconds at index 0: should remain 0
   assert.equal(calculateResumeIndex(0, 100000, 125000), 0);
 });
+
+test('Offline Multi-key Cache Matching - Matches exact, normalized, or text-fallback keys', async () => {
+  const crypto = await import('crypto');
+  function md5(str) {
+    return crypto.createHash('md5').update(str, 'utf8').digest('hex');
+  }
+
+  function getCacheKeys(voice, rate, pitch, text) {
+    const cleanVoice = voice || 'edge:vi-VN-NamMinhNeural';
+    return {
+      exact: 'sent_' + md5(cleanVoice + '_' + rate + '_' + pitch + '_' + text) + '.mp3',
+      normalized: 'sent_' + md5(cleanVoice + '_1.0_1.0_' + text) + '.mp3',
+      textFallback: 'sent_txt_' + md5(text.trim()) + '.mp3'
+    };
+  }
+
+  // When saved, Android creates exact key, normalized key, and text fallback key
+  const savedKeys = getCacheKeys('edge:vi-VN-NamMinhNeural', 1.0, 1.0, 'Trời hôm nay nhiều mây.');
+
+  // Playback at rate 1.5 with edge voice: normalized key matches the saved normalized key
+  const playKeys1 = getCacheKeys('edge:vi-VN-NamMinhNeural', 1.5, 1.0, 'Trời hôm nay nhiều mây.');
+  assert.equal(playKeys1.normalized, savedKeys.normalized, 'Normalized key matches saved normalized cache file');
+
+  // Playback with a different voice (e.g. native:android): text fallback matches saved text fallback
+  const playKeys2 = getCacheKeys('native:android', 1.2, 1.0, 'Trời hôm nay nhiều mây.');
+  assert.equal(playKeys2.textFallback, savedKeys.textFallback, 'Text fallback matches regardless of voice or rate');
+});

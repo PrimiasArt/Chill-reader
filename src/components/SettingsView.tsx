@@ -922,13 +922,17 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
               </button>
             </div>
 
-            {ttsStatus === 'missing_data' && (
+            {(ttsStatus === 'missing_data' || ttsStatus === 'missing_offline_data') && (
               <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-start gap-2 text-xs text-amber-300">
                 <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <p className="font-semibold">Điện thoại chưa tải gói giọng đọc Tiếng Việt offline</p>
-                  <p className="text-[11px] text-zinc-400 mt-0.5">
-                    Chạm vào "Cài đặt máy" ở trên &rarr; Cài đặt dữ liệu giọng nói &rarr; Tải gói Tiếng Việt để nghe offline khi không có mạng.
+                  <p className="font-semibold">Điện thoại chưa tải gói giọng đọc Tiếng Việt offline của Google</p>
+                  <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                    Để nghe offline khi không có mạng, bạn có thể:
+                    <br />
+                    1. Chạm vào <b>"Cài đặt máy"</b> ở trên &rarr; Cài đặt dữ liệu giọng nói &rarr; Tải gói Tiếng Việt (~20MB).
+                    <br />
+                    2. Hoặc dùng tính năng <b>"Tải Âm Thanh"</b> ở từng chương để nghe offline bằng giọng đọc AI chất lượng cao!
                   </p>
                 </div>
               </div>
