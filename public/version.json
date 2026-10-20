@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.47",
-  "versionCode": 147,
-  "buildTime": "2026-10-21T00:05:00Z",
+  "versionName": "1.0.48",
+  "versionCode": 148,
+  "buildTime": "2026-10-21T01:05:00Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "HEAD",
-  "releaseNotes": "Bản cập nhật Sửa Triệt Để Lỗi Âm Thanh Offline & Ngừng Bất Chợt (Audio Reliability & Zero-Stall Offline Fix) v1.0.47:\n• Khắc phục 100% tình trạng mất tiếng khi không có mạng: Cơ chế Multi-Key Offline Cache thông minh (Exact key, Normalized speed key, và Text Fallback key) đảm bảo mọi âm thanh đã tải trước từ tính năng 'Tải Âm Thanh' hoặc nghe trước đó đều phát mượt mà không cần mạng, bất kể đổi giọng hay đổi tốc độ đọc.\n• Tự động lọc giọng Google Voice khi ngắt mạng: Nhận diện chính xác giọng cần mạng hay đã có gói offline trong máy, tự động chuyển đổi sang giọng offline cục bộ, tránh hoàn toàn lỗi câm tiếng khi không có mạng.\n• Khắc phục triệt để hiện tượng dừng audio bất chợt khi chuyển trang hoặc chuyển chương: Xóa bỏ xung đột cuộc gọi kép (race-condition) giữa advanceToNextChapter và onChapterComplete, loại bỏ kiểm tra utteranceId cứng nhắc trên các dòng máy Samsung/Xiaomi/Tecno, bổ sung cơ chế tự phục hồi sau 300ms khi TTS bị gián đoạn ngoài ý muốn do tắt màn hình hoặc chuyển trang."
+  "releaseNotes": "Bản cập nhật Sửa Lỗi Nghiêm Trọng Lặp Âm & Chuyển Chương 100% Offline (v1.0.48):\n• Sửa triệt để lỗi lặp âm (stuttering/repeating loop): Loại bỏ vòng lặp kích hoạt lại trong onStop của Android TTS khi chuyển câu bằng QUEUE_FLUSH, câu đọc mượt mà từ đầu đến cuối không bị lặp chữ hay nói ngắt quãng.\n• Tự động chuyển tiếp chương mới 100% không gián đoạn: Thống nhất một luồng chuyển chương duy nhất qua App.tsx & handleSelectChapter, đảm bảo khi đọc hết câu cuối cùng của chương thì app tự động nạp và đọc tiếp Chương tiếp theo ngay tức khắc, cập nhật chuẩn xác giao diện và tiến độ đọc kể cả khi tắt màn hình.\n• Chuyển đổi 100% sang giọng đọc Ngoại tuyến (Offline Native Android): Thiết lập Giọng máy Android (100% Offline) làm giọng mặc định duy nhất, tự động chuyển đổi các cấu hình giọng online cũ sang giọng offline máy, không còn bất kỳ sự phụ thuộc nào vào mạng Internet hay máy chủ ngoài."
 }

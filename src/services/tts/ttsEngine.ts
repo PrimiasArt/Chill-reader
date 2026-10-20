@@ -26,35 +26,7 @@ export interface VoiceOption {
   isOnline: boolean;
 }
 
-export const CURATED_VOICES: VoiceOption[] = [
-  {
-    id: 'edge:vi-VN-NamMinhNeural',
-    name: 'Nam Minh (AI Neural)',
-    category: 'ai',
-    gender: 'male',
-    badge: 'Hào Hùng · Kiếm Hiệp',
-    description: 'Giọng Nam trầm ấm, hào hùng, đọc truyện Kiếm hiệp, Tiên hiệp cực kỳ lôi cuốn',
-    isOnline: true
-  },
-  {
-    id: 'edge:vi-VN-HoaiMyNeural',
-    name: 'Hoài My (AI Neural)',
-    category: 'ai',
-    gender: 'female',
-    badge: 'Truyền Cảm · Ngôn Tình',
-    description: 'Giọng Nữ truyền cảm, ngọt ngào, phù hợp Ngôn tình, Đô thị, Huyền huyễn',
-    isOnline: true
-  },
-  {
-    id: 'google:vi',
-    name: 'Google Tiếng Việt',
-    category: 'google',
-    gender: 'female',
-    badge: 'Chuẩn Mực · Rõ Ràng',
-    description: 'Giọng đọc Google chuẩn xác, rõ từng chữ, dễ nghe',
-    isOnline: true
-  }
-];
+export const CURATED_VOICES: VoiceOption[] = [];
 
 const getTtsApiBase = () => getApiBase();
 
@@ -96,8 +68,8 @@ class TTSEngine {
   private shakeCleanup: (() => void) | null = null;
 
   private settings: TTSSettings = {
-    voiceURI: 'edge:vi-VN-NamMinhNeural',
-    engine: 'ai',
+    voiceURI: 'native:android',
+    engine: 'native',
     rate: 1.0,
     pitch: 1.0,
     sleepTimerMinutes: null,
@@ -321,7 +293,17 @@ class TTSEngine {
   }
 
   public getAllAvailableVoices(): VoiceOption[] {
-    const list: VoiceOption[] = [...CURATED_VOICES];
+    const list: VoiceOption[] = [];
+
+    list.push({
+      id: 'native:android',
+      name: 'Giọng đọc Máy Android (100% Offline Mặc định)',
+      category: 'native',
+      gender: 'neutral',
+      badge: '100% Offline · Không mạng',
+      description: 'Giọng đọc ngoại tuyến có sẵn trên điện thoại, đọc mượt mà không cần mạng Internet',
+      isOnline: false
+    });
 
     const isAndroid = typeof window !== 'undefined' && (
       Boolean((window as any).AndroidMedia) || 
@@ -329,17 +311,6 @@ class TTSEngine {
     );
 
     if (isAndroid) {
-      list.push({
-        id: 'native:android',
-        name: 'Giọng máy Android mặc định (100% Offline)',
-        category: 'native',
-        gender: 'neutral',
-        badge: '100% Offline · Không mạng',
-        description: 'Giọng đọc gốc của điện thoại Android (Google Speech Services), đọc mượt mà không cần mạng Internet',
-        isOnline: false
-      });
-
-      // Query native Android TTS voices directly from TextToSpeech
       const androidMedia = (window as any).AndroidMedia;
       if (androidMedia && typeof androidMedia.getNativeVoicesJson === 'function') {
         try {
@@ -350,17 +321,17 @@ class TTSEngine {
               const lower = (nv.name || '').toLowerCase();
               const isMale = lower.includes('vic') || lower.includes('male') || lower.includes('nam') || lower.includes('vid');
               const isOffline = !nv.requiresNetwork;
-              list.push({
-                id: nv.id || `native:${nv.name}`,
-                name: `Google Tiếng Việt (${isMale ? 'Nam' : 'Nữ'} #${idx + 1})`,
-                category: 'native',
-                gender: isMale ? 'male' : 'female',
-                badge: isOffline ? '100% Offline · Máy' : 'Cần mạng (Google)',
-                description: isOffline
-                  ? `Giọng đọc Android (${nv.name}) - Hoạt động ngoại tuyến không cần mạng`
-                  : `Giọng đọc Google (${nv.name}) - Cần mạng Internet hoặc tải gói ngoại tuyến trong Cài đặt máy`,
-                isOnline: !isOffline
-              });
+              if (isOffline) {
+                list.push({
+                  id: nv.id || `native:${nv.name}`,
+                  name: `Giọng máy ${isMale ? 'Nam' : 'Nữ'} #${idx + 1} (${nv.name})`,
+                  category: 'native',
+                  gender: isMale ? 'male' : 'female',
+                  badge: '100% Offline · Máy',
+                  description: `Gói giọng đọc Tiếng Việt offline trên máy (${nv.name})`,
+                  isOnline: false
+                });
+              }
             });
           }
         } catch (e) {
@@ -382,7 +353,7 @@ class TTSEngine {
         category: 'browser',
         gender: isMale ? 'male' : 'female',
         badge: 'Offline · Thiết bị',
-        description: `Giọng đọc có sẵn trên máy (${bv.lang}) - Hoạt động khi không có mạng`,
+        description: `Giọng đọc có sẵn trên máy (${bv.lang})`,
         isOnline: false
       });
     });
@@ -453,6 +424,10 @@ class TTSEngine {
     const pitchChanged = newSettings.pitch !== undefined && newSettings.pitch !== this.settings.pitch;
 
     this.settings = { ...this.settings, ...newSettings };
+    if (!this.settings.voiceURI || this.settings.voiceURI.startsWith('edge:') || this.settings.voiceURI.startsWith('google:')) {
+      this.settings.voiceURI = 'native:android';
+      this.settings.engine = 'native';
+    }
 
     if (newSettings.sleepTimerMinutes !== undefined) {
       this.setSleepTimer(newSettings.sleepTimerMinutes);
@@ -825,15 +800,6 @@ class TTSEngine {
       this.jumpToSentence(this.currentSentenceIndex + 1);
     } else {
       // Reached the end of the chapter
-      if (this.settings.autoNextChapter && this.currentStoryId) {
-        this.advanceToNextChapter().then((advanced) => {
-          if (!advanced) {
-            this.stop();
-          }
-          this.listeners.forEach(l => l.onChapterComplete?.());
-        });
-        return;
-      }
       this.stop();
       this.listeners.forEach(l => l.onChapterComplete?.());
     }
@@ -841,7 +807,7 @@ class TTSEngine {
 
   private getAudioUrl(sentenceText: string, index?: number): string {
     const processedText = pronunciationService.applyRules(sentenceText);
-    let voice = this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural';
+    let voice = this.settings.voiceURI || 'native:android';
 
     // Multi-Voice AI Drama: Dialogue character voice detection
     if (this.settings.multiVoiceDrama) {
@@ -851,7 +817,7 @@ class TTSEngine {
         if (roleAnalysis.role === 'female') {
           voice = this.settings.femaleVoiceURI || 'edge:vi-VN-HoaiMyNeural';
         } else {
-          voice = this.settings.maleVoiceURI || 'edge:vi-VN-NamMinhNeural';
+          voice = this.settings.maleVoiceURI || 'native:android';
         }
       }
     }
@@ -895,7 +861,7 @@ class TTSEngine {
           const rawText = this.sentences[rec.sentenceIndex];
           const processedText = pronunciationService.applyRules(rawText);
           this.bridgeBlobToNativeDisk(
-            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.voiceURI || 'native:android',
             this.settings.rate || 1.0,
             this.settings.pitch || 1.0,
             rawText,
@@ -903,7 +869,7 @@ class TTSEngine {
           );
           if (processedText !== rawText) {
             this.bridgeBlobToNativeDisk(
-              this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+              this.settings.voiceURI || 'native:android',
               this.settings.rate || 1.0,
               this.settings.pitch || 1.0,
               processedText,
@@ -955,7 +921,7 @@ class TTSEngine {
         db.saveOfflineAudio(this.currentStoryId, this.currentChapterNumber, index, blob).catch(() => {});
         const processedText = pronunciationService.applyRules(text);
         this.bridgeBlobToNativeDisk(
-          this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+          this.settings.voiceURI || 'native:android',
           this.settings.rate || 1.0,
           this.settings.pitch || 1.0,
           text,
@@ -963,7 +929,7 @@ class TTSEngine {
         );
         if (processedText !== text) {
           this.bridgeBlobToNativeDisk(
-            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.voiceURI || 'native:android',
             this.settings.rate || 1.0,
             this.settings.pitch || 1.0,
             processedText,
@@ -1012,7 +978,7 @@ class TTSEngine {
           const rawText = list[i];
           const processedText = pronunciationService.applyRules(rawText);
           this.bridgeBlobToNativeDisk(
-            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.voiceURI || 'native:android',
             this.settings.rate || 1.0,
             this.settings.pitch || 1.0,
             rawText,
@@ -1020,7 +986,7 @@ class TTSEngine {
           );
           if (processedText !== rawText) {
             this.bridgeBlobToNativeDisk(
-              this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+              this.settings.voiceURI || 'native:android',
               this.settings.rate || 1.0,
               this.settings.pitch || 1.0,
               processedText,
@@ -1039,7 +1005,7 @@ class TTSEngine {
           const rawText = text;
           const processedText = pronunciationService.applyRules(rawText);
           this.bridgeBlobToNativeDisk(
-            this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+            this.settings.voiceURI || 'native:android',
             this.settings.rate || 1.0,
             this.settings.pitch || 1.0,
             rawText,
@@ -1047,7 +1013,7 @@ class TTSEngine {
           );
           if (processedText !== rawText) {
             this.bridgeBlobToNativeDisk(
-              this.settings.voiceURI || 'edge:vi-VN-NamMinhNeural',
+              this.settings.voiceURI || 'native:android',
               this.settings.rate || 1.0,
               this.settings.pitch || 1.0,
               processedText,
@@ -1172,16 +1138,6 @@ class TTSEngine {
 
     // Check if we reached the end of the chapter
     if (this.currentSentenceIndex >= this.sentences.length) {
-      if (this.settings.autoNextChapter && this.currentStoryId) {
-        this.advanceToNextChapter().then((advanced) => {
-          if (!advanced) {
-            this.stop();
-            this.clearAudioBlobCache();
-          }
-          this.listeners.forEach(l => l.onChapterComplete?.());
-        });
-        return;
-      }
       this.stop();
       this.clearAudioBlobCache();
       this.listeners.forEach(l => l.onChapterComplete?.());
@@ -1477,16 +1433,7 @@ class TTSEngine {
   }
 
   public onNativeChapterComplete() {
-    if (this.settings.autoNextChapter && this.currentStoryId) {
-      this.advanceToNextChapter().then((advanced) => {
-        if (!advanced) {
-          this.stop();
-        }
-        this.listeners.forEach(l => l.onChapterComplete?.());
-      });
-      return;
-    }
-    this.stop();
+    this.notifyState('idle');
     this.listeners.forEach(l => l.onChapterComplete?.());
   }
 

@@ -999,6 +999,11 @@ public class MediaPlaybackService extends Service {
                             @Override
                             public void onDone(String utteranceId) {
                                 getPlaybackHandler().post(() -> {
+                                    if (utteranceId != null && currentSpeakingUtteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                        if (utteranceId.startsWith("utt_") || utteranceId.startsWith("fallback_")) {
+                                            return;
+                                        }
+                                    }
                                     cancelTtsWatchdog();
                                     nativeConsecutiveErrors = 0;
                                     if (!isNativeTtsMode || !sIsPlaying) return;
@@ -1020,18 +1025,12 @@ public class MediaPlaybackService extends Service {
                             @Override
                             public void onStop(String utteranceId, boolean interrupted) {
                                 getPlaybackHandler().post(() -> {
-                                    cancelTtsWatchdog();
-                                    // If sIsPlaying is still true and we were NOT paused by system or user,
-                                    // this was an unexpected engine abort/interruption (e.g. screen off, transient audio routing).
-                                    // Recover after a brief debounce so playback never freezes!
-                                    if (sIsPlaying && !pausedBySystem && isNativeTtsMode) {
-                                        final int currentIndex = nativeSentenceIndex;
-                                        getPlaybackHandler().postDelayed(() -> {
-                                            if (sIsPlaying && !pausedBySystem && isNativeTtsMode && nativeSentenceIndex == currentIndex) {
-                                                playCurrentNativeSentence();
-                                            }
-                                        }, 300);
+                                    if (utteranceId != null && currentSpeakingUtteranceId != null && !utteranceId.equals(currentSpeakingUtteranceId)) {
+                                        return;
                                     }
+                                    cancelTtsWatchdog();
+                                    // onStop is called when utterance is stopped by pause or QUEUE_FLUSH.
+                                    // Never auto-replay here to prevent stuttering/looping audio.
                                 });
                             }
                         });

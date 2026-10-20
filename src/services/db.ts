@@ -20,8 +20,8 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
 };
 
 export const DEFAULT_TTS_SETTINGS: TTSSettings = {
-  voiceURI: 'edge:vi-VN-NamMinhNeural',
-  engine: 'ai',
+  voiceURI: 'native:android',
+  engine: 'native',
   rate: 1.0,
   pitch: 1.0,
   sleepTimerMinutes: null,
@@ -29,8 +29,8 @@ export const DEFAULT_TTS_SETTINGS: TTSSettings = {
   autoNextChapter: true,
   playAlongOtherApps: true,
   multiVoiceDrama: false,
-  femaleVoiceURI: 'edge:vi-VN-HoaiMyNeural',
-  maleVoiceURI: 'edge:vi-VN-NamMinhNeural',
+  femaleVoiceURI: 'native:android',
+  maleVoiceURI: 'native:android',
   autoContextAmbient: false
 };
 

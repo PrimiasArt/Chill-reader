@@ -879,11 +879,11 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-semibold text-sm text-zinc-100">Cấu hình Giọng đọc Audio (TTS)</h3>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium truncate max-w-[130px]">
-                  {ttsSettings.voiceURI?.replace('edge:vi-VN-', '').replace('google:vi', 'Google') || 'Nam Minh'}
+                  {ttsSettings.voiceURI === 'native:android' ? 'Giọng Offline máy' : ttsSettings.voiceURI?.replace('native:', '') || 'Giọng Offline'}
                 </span>
               </div>
               <p className="text-xs text-zinc-400 mt-0.5 truncate">
-                Tốc độ {ttsSettings.rate}x • Cao độ {ttsSettings.pitch} • Giọng AI Neural & Native Android
+                Tốc độ {ttsSettings.rate}x • Cao độ {ttsSettings.pitch} • 100% Offline Native Android
               </p>
             </div>
           </div>
@@ -895,7 +895,7 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
         {openSections.audio && (
           <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-5 animate-in fade-in duration-200">
             <p className="text-xs text-zinc-400 pt-3">
-              Hỗ trợ giọng AI Neural truyền cảm tự nhiên, giọng Google và giọng có sẵn trên thiết bị
+              Sử dụng giọng đọc ngoại tuyến 100% từ thiết bị, đọc mượt mà không cần mạng Internet
             </p>
 
         {/* Native Android TTS Engine info & Settings shortcut */}
@@ -948,7 +948,7 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
 
           <div className="space-y-2">
             {voices.map((v) => {
-              const isSelected = (ttsSettings.voiceURI || 'edge:vi-VN-NamMinhNeural') === v.id;
+              const isSelected = (ttsSettings.voiceURI || 'native:android') === v.id;
               const isTesting = testingVoiceId === v.id;
 
               return (
@@ -1187,7 +1187,7 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
               <div className="space-y-1.5">
                 <label className="text-zinc-400 font-medium">Giọng đối thoại Nữ:</label>
                 <select
-                  value={ttsSettings.femaleVoiceURI || 'edge:vi-VN-HoaiMyNeural'}
+                  value={ttsSettings.femaleVoiceURI || 'native:android'}
                   onChange={(e) => {
                     const val = e.target.value;
                     onUpdateTtsSettings({ femaleVoiceURI: val });
@@ -1204,7 +1204,7 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
               <div className="space-y-1.5">
                 <label className="text-zinc-400 font-medium">Giọng đối thoại Nam:</label>
                 <select
-                  value={ttsSettings.maleVoiceURI || 'edge:vi-VN-NamMinhNeural'}
+                  value={ttsSettings.maleVoiceURI || 'native:android'}
                   onChange={(e) => {
                     const val = e.target.value;
                     onUpdateTtsSettings({ maleVoiceURI: val });

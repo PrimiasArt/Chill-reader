@@ -56,7 +56,15 @@ export const App: React.FC = () => {
 
       // Load Settings
       const savedReaderSettings = await db.getSetting<ReaderSettings>('readerSettings', DEFAULT_READER_SETTINGS);
-      const savedTtsSettings = await db.getSetting<TTSSettings>('ttsSettings', DEFAULT_TTS_SETTINGS);
+      let savedTtsSettings = await db.getSetting<TTSSettings>('ttsSettings', DEFAULT_TTS_SETTINGS);
+      if (!savedTtsSettings.voiceURI || savedTtsSettings.voiceURI.startsWith('edge:') || savedTtsSettings.voiceURI.startsWith('google:')) {
+        savedTtsSettings = {
+          ...savedTtsSettings,
+          voiceURI: 'native:android',
+          engine: 'native'
+        };
+        await db.saveSetting('ttsSettings', savedTtsSettings);
+      }
       setReaderSettings(savedReaderSettings);
       setTtsSettings(savedTtsSettings);
       ttsEngine.updateSettings(savedTtsSettings);
@@ -164,11 +172,9 @@ export const App: React.FC = () => {
       },
       onChapterComplete: () => {
         if (ttsSettings.autoNextChapter && activeStory && activeStoryChapters.length > 0) {
-          if (!ttsEngine.getCurrentStoryId()) {
-            if (currentChapterNumber < activeStoryChapters.length) {
-              const nextNum = currentChapterNumber + 1;
-              handleSelectChapter(nextNum, true);
-            }
+          if (currentChapterNumber < activeStoryChapters.length) {
+            const nextNum = currentChapterNumber + 1;
+            handleSelectChapter(nextNum, true);
           }
         }
       }

@@ -486,7 +486,7 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
                 {activeSettingTab === 'voice' && (
                   <div className="space-y-2">
                     <select
-                      value={settings.voiceURI || 'edge:vi-VN-NamMinhNeural'}
+                      value={settings.voiceURI || 'native:android'}
                       onChange={(e) => {
                         const voiceURI = e.target.value;
                         const v = allVoices.find(x => x.id === voiceURI);
