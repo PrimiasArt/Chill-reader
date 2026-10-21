@@ -97,7 +97,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [showOfflineAudioModal, setShowOfflineAudioModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showAiCompanion, setShowAiCompanion] = useState(false);
-  const [pageFlipDirection, setPageFlipDirection] = useState<'next' | 'prev'>('next');
   const [rulerY, setRulerY] = useState<number | null>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
 
@@ -106,9 +105,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const [quickJumpInput, setQuickJumpInput] = useState('');
   const [tocScrollTop, setTocScrollTop] = useState(0);
   const tocContainerRef = useRef<HTMLDivElement>(null);
-
-  // Paged mode pagination state
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
 
   // Check new chapters state
   const [isCheckingNewChapters, setIsCheckingNewChapters] = useState(false);
@@ -316,32 +312,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     return ttsEngine.splitIntoSentences(currentChapter.content);
   }, [currentChapter, isComicChapter, comicPages]);
 
-  // Paged mode calculations
-  const sentencesPerPage = 8;
-  const totalPages = isComicChapter 
-    ? Math.max(1, comicPages.length) 
-    : Math.max(1, Math.ceil(sentences.length / sentencesPerPage));
-
-  // Reset page when chapter changes
-  useEffect(() => {
-    setCurrentPageIndex(0);
-  }, [currentChapterNumber]);
-
-  // Luxury page change with realistic page turn sound effect
-  const handlePageChange = (direction: 'next' | 'prev') => {
-    if (settings.pageTurnSound !== false && ttsState !== 'playing') {
-      ambientAudioService.playPageTurnSound();
-    }
-    setPageFlipDirection(direction);
-    if (direction === 'next') {
-      setCurrentPageIndex(p => Math.min(totalPages - 1, p + 1));
-    } else {
-      setCurrentPageIndex(p => Math.max(0, p - 1));
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Luxury chapter change with realistic sound effect
+    // Luxury chapter change with realistic sound effect
   const handleChapterChange = (chapterNumber: number) => {
     if (settings.pageTurnSound !== false && ttsState !== 'playing') {
       ambientAudioService.playPageTurnSound();
@@ -350,16 +321,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Turn page automatically when TTS reads in paged mode
-  useEffect(() => {
-    if (settings.readerMode === 'paged' && ttsState !== 'idle' && activeSentenceIndex >= 0) {
-      const pageOfActiveSentence = Math.floor(activeSentenceIndex / sentencesPerPage);
-      if (pageOfActiveSentence !== currentPageIndex && pageOfActiveSentence < totalPages) {
-        setPageFlipDirection(pageOfActiveSentence > currentPageIndex ? 'next' : 'prev');
-        setCurrentPageIndex(pageOfActiveSentence);
-      }
-    }
-  }, [activeSentenceIndex, settings.readerMode, ttsState, totalPages, currentPageIndex]);
 
   // Periodic reading activity tracker (Reading Stats & Streaks)
   useEffect(() => {
@@ -509,7 +470,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   // Scroll to active sentence ONLY if it is out of the visible screen viewport
   useEffect(() => {
-    if (settings.readerMode !== 'paged' && ttsState === 'playing' && sentenceRefs.current[activeSentenceIndex]) {
+    if (ttsState === 'playing' && sentenceRefs.current[activeSentenceIndex]) {
       const el = sentenceRefs.current[activeSentenceIndex];
       if (el) {
         const rect = el.getBoundingClientRect();
@@ -522,7 +483,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
         }
       }
     }
-  }, [activeSentenceIndex, ttsState, settings.readerMode]);
+  }, [activeSentenceIndex, ttsState]);
 
   // Handle click on specific sentence to listen from that sentence (guarded against swipes and selections)
   const handleSentenceClick = (index: number) => {
@@ -1032,135 +993,22 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             </p>
           </div>
 
-          {/* Comic Viewer OR Text Sentences - Paged vs Continuous Scroll */}
+          {/* Comic Viewer OR Text Sentences - Continuous Whole Chapter */}
           {isComicChapter && comicPages.length > 0 ? (
-            settings.readerMode === 'paged' ? (
-              <div className="perspective-container flex flex-col items-center justify-between min-h-[60vh]">
-                <div 
-                  key={currentPageIndex} 
-                  className={`w-full max-w-2xl mx-auto flex flex-col items-center select-none ${pageFlipDirection === 'next' ? 'animate-page-flip-next' : 'animate-page-flip-prev'}`}
-                >
+            <div className="comic-scroll-view space-y-4 max-w-3xl mx-auto select-none">
+              {comicPages.map((imgSrc, pIdx) => (
+                <div key={pIdx} className="relative group rounded-xl overflow-hidden shadow-2xl bg-zinc-950 border border-zinc-800">
                   <img
-                    src={comicPages[currentPageIndex]}
-                    alt={`Trang ${currentPageIndex + 1}`}
-                    className="w-full h-auto max-h-[78vh] object-contain rounded-xl shadow-2xl bg-zinc-950 border border-zinc-800"
+                    src={imgSrc}
+                    alt={`Trang ${pIdx + 1}`}
+                    className="w-full h-auto object-contain mx-auto block"
+                    loading={pIdx < 2 ? 'eager' : 'lazy'}
                   />
-                </div>
-
-                {/* Paged Navigation Bar */}
-                <div className="w-full max-w-2xl mt-6 pt-4 border-t border-current opacity-30 flex items-center justify-between text-xs">
-                  <button
-                    disabled={currentPageIndex === 0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handlePageChange('prev');
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" /> Trang trước
-                  </button>
-
-                  <span className="font-mono text-xs opacity-80">
-                    Trang {currentPageIndex + 1} / {totalPages}
-                  </span>
-
-                  <button
-                    disabled={currentPageIndex >= totalPages - 1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handlePageChange('next');
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
-                  >
-                    Trang sau <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="comic-scroll-view space-y-4 max-w-3xl mx-auto select-none">
-                {comicPages.map((imgSrc, pIdx) => (
-                  <div key={pIdx} className="relative group rounded-xl overflow-hidden shadow-2xl bg-zinc-950 border border-zinc-800">
-                    <img
-                      src={imgSrc}
-                      alt={`Trang ${pIdx + 1}`}
-                      className="w-full h-auto object-contain mx-auto block"
-                      loading={pIdx < 2 ? 'eager' : 'lazy'}
-                    />
-                    <div className="absolute bottom-2 right-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-xs text-[10px] font-mono text-zinc-300 opacity-60 group-hover:opacity-100 transition-opacity">
-                      {pIdx + 1} / {comicPages.length}
-                    </div>
+                  <div className="absolute bottom-2 right-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-xs text-[10px] font-mono text-zinc-300 opacity-60 group-hover:opacity-100 transition-opacity">
+                    {pIdx + 1} / {comicPages.length}
                   </div>
-                ))}
-              </div>
-            )
-          ) : settings.readerMode === 'paged' ? (
-            <div className="perspective-container flex flex-col min-h-[55vh] justify-between">
-              <div 
-                key={currentPageIndex} 
-                className={`space-y-4 ${pageFlipDirection === 'next' ? 'animate-page-flip-next' : 'animate-page-flip-prev'}`}
-              >
-                {sentences
-                  .slice(currentPageIndex * sentencesPerPage, (currentPageIndex + 1) * sentencesPerPage)
-                  .map((sentence, localIdx) => {
-                    const sentenceIdx = currentPageIndex * sentencesPerPage + localIdx;
-                    const isActive = ttsState !== 'idle' && sentenceIdx === activeSentenceIndex;
-                    return (
-                      <span
-                        key={sentenceIdx}
-                        ref={(el) => { sentenceRefs.current[sentenceIdx] = el; }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSentenceClick(sentenceIdx);
-                        }}
-                        className={`inline-block mr-1 rounded px-0.5 transition-colors cursor-pointer hover:bg-amber-500/10 ${
-                          isActive ? 'tts-highlight font-medium' : ''
-                        }`}
-                      >
-                        {settings.bionicReading ? (
-                          sentence.split(' ').map((word, wIdx) => {
-                            const { bold, rest } = renderBionicWord(word);
-                            return (
-                              <React.Fragment key={wIdx}>
-                                <strong className="bionic-bold">{bold}</strong>{rest}{' '}
-                              </React.Fragment>
-                            );
-                          })
-                        ) : (
-                          <>{sentence} </>
-                        )}
-                      </span>
-                    );
-                  })}
-              </div>
-
-              {/* Paged Navigation Bar */}
-              <div className="mt-8 pt-4 border-t border-current opacity-30 flex items-center justify-between text-xs">
-                <button
-                  disabled={currentPageIndex === 0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlePageChange('prev');
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" /> Trang trước
-                </button>
-
-                <span className="font-mono text-xs opacity-80">
-                  Trang {currentPageIndex + 1} / {totalPages}
-                </span>
-
-                <button
-                  disabled={currentPageIndex >= totalPages - 1}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handlePageChange('next');
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 cursor-pointer flex items-center gap-1"
-                >
-                  Trang sau <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="space-y-4">
@@ -1488,33 +1336,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               />
             </div>
 
-            {/* Reader Mode (Cuộn liên tục vs Lật trang) */}
-            <div className="pt-2 border-t border-zinc-800">
-              <label className="text-[11px] text-zinc-400 font-medium block mb-2">Chế độ đọc</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => onUpdateSettings({ readerMode: 'scroll' })}
-                  className={`py-1.5 rounded-lg border text-xs font-medium transition-all ${
-                    settings.readerMode === 'scroll'
-                      ? 'border-amber-500 bg-amber-500/10 text-amber-300 font-bold'
-                      : 'border-zinc-700 text-zinc-300'
-                  }`}
-                >
-                  Cuộn liên tục
-                </button>
-                <button
-                  onClick={() => onUpdateSettings({ readerMode: 'paged' })}
-                  className={`py-1.5 rounded-lg border text-xs font-medium transition-all ${
-                    settings.readerMode === 'paged'
-                      ? 'border-amber-500 bg-amber-500/10 text-amber-300 font-bold'
-                      : 'border-zinc-700 text-zinc-300'
-                  }`}
-                >
-                  Lật trang (Kindle)
-                </button>
-              </div>
-            </div>
-
             {/* Giữ màn hình luôn sáng khi đọc */}
             <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
               <div>
@@ -1566,8 +1387,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
               {/* Page Turn Sound */}
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs text-zinc-200 font-medium block">Âm thanh lật trang</span>
-                  <span className="text-[10px] text-zinc-400">Tiếng sột soạt giấy thật khi chuyển trang</span>
+                  <span className="text-xs text-zinc-200 font-medium block">Âm thanh chuyển chương</span>
+                  <span className="text-[10px] text-zinc-400">Tiếng sột soạt giấy thật khi đổi chương</span>
                 </div>
                 <input
                   type="checkbox"

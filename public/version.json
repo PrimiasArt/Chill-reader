@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.48",
-  "versionCode": 148,
-  "buildTime": "2026-10-21T01:05:00Z",
+  "versionName": "1.0.49",
+  "versionCode": 149,
+  "buildTime": "2026-10-21T19:00:24.474Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "HEAD",
-  "releaseNotes": "Bản cập nhật Sửa Lỗi Nghiêm Trọng Lặp Âm & Chuyển Chương 100% Offline (v1.0.48):\n• Sửa triệt để lỗi lặp âm (stuttering/repeating loop): Loại bỏ vòng lặp kích hoạt lại trong onStop của Android TTS khi chuyển câu bằng QUEUE_FLUSH, câu đọc mượt mà từ đầu đến cuối không bị lặp chữ hay nói ngắt quãng.\n• Tự động chuyển tiếp chương mới 100% không gián đoạn: Thống nhất một luồng chuyển chương duy nhất qua App.tsx & handleSelectChapter, đảm bảo khi đọc hết câu cuối cùng của chương thì app tự động nạp và đọc tiếp Chương tiếp theo ngay tức khắc, cập nhật chuẩn xác giao diện và tiến độ đọc kể cả khi tắt màn hình.\n• Chuyển đổi 100% sang giọng đọc Ngoại tuyến (Offline Native Android): Thiết lập Giọng máy Android (100% Offline) làm giọng mặc định duy nhất, tự động chuyển đổi các cấu hình giọng online cũ sang giọng offline máy, không còn bất kỳ sự phụ thuộc nào vào mạng Internet hay máy chủ ngoài."
+  "releaseNotes": "Bản cập nhật Bỏ Cơ Chế Chia Trang - Đọc Toàn Chương Liền Mạch (v1.0.49):\n• Xóa bỏ hoàn toàn cơ chế chia trang nhỏ trong chương: Toàn bộ nội dung chương được hiển thị liền mạch và đọc liên tục từ đầu đến cuối chương, không còn cắt nhỏ 8 câu/trang.\n• Khắc phục triệt để hiện tượng tắt tiếng khi qua trang: Loại bỏ việc hủy/tạo lại DOM và hiệu ứng lật trang 3D giữa chừng khi đọc, âm thanh TTS chạy trơn tru từ câu đầu tiên đến câu cuối cùng của chương.\n• Tự động cuộn theo câu đang đọc mượt mà: Màn hình tự động cuộn nhẹ nhàng theo giọng đọc mà không làm ngắt quãng luồng âm thanh hay lag giao diện."
 }
