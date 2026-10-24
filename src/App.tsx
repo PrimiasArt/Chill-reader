@@ -57,13 +57,20 @@ export const App: React.FC = () => {
       // Load Settings
       const savedReaderSettings = await db.getSetting<ReaderSettings>('readerSettings', DEFAULT_READER_SETTINGS);
       let savedTtsSettings = await db.getSetting<TTSSettings>('ttsSettings', DEFAULT_TTS_SETTINGS);
-      if (!savedTtsSettings.voiceURI || savedTtsSettings.voiceURI.startsWith('edge:') || savedTtsSettings.voiceURI.startsWith('google:')) {
-        savedTtsSettings = {
-          ...savedTtsSettings,
-          voiceURI: 'native:android',
-          engine: 'native'
-        };
-        await db.saveSetting('ttsSettings', savedTtsSettings);
+      if (savedTtsSettings) {
+        let changed = false;
+        if (!savedTtsSettings.voiceURI || savedTtsSettings.voiceURI.startsWith('edge:') || savedTtsSettings.voiceURI.startsWith('google:')) {
+          savedTtsSettings.voiceURI = 'native:android';
+          savedTtsSettings.engine = 'native';
+          changed = true;
+        }
+        if (savedTtsSettings.autoNextChapter === undefined) {
+          savedTtsSettings.autoNextChapter = true;
+          changed = true;
+        }
+        if (changed) {
+          await db.saveSetting('ttsSettings', savedTtsSettings);
+        }
       }
       setReaderSettings(savedReaderSettings);
       setTtsSettings(savedTtsSettings);
@@ -166,16 +173,15 @@ export const App: React.FC = () => {
       },
       onTimeRemainingUpdate: (seconds) => setCountdownSeconds(seconds),
       onChapterChange: (chapterNum) => {
-        if (chapterNum > 0) {
-          setCurrentChapterNumber(chapterNum);
+        const num = Number(chapterNum);
+        if (num > 0) {
+          setCurrentChapterNumber(num);
+          setActiveStory(prev => prev ? { ...prev, currentChapterNumber: num } : null);
         }
       },
-      onChapterComplete: () => {
-        if (ttsSettings.autoNextChapter && activeStory && activeStoryChapters.length > 0) {
-          if (currentChapterNumber < activeStoryChapters.length) {
-            const nextNum = currentChapterNumber + 1;
-            handleSelectChapter(nextNum, true);
-          }
+      onChapterComplete: async () => {
+        if (ttsSettings.autoNextChapter !== false) {
+          await ttsEngine.advanceToNextChapter();
         }
       }
     });
@@ -228,23 +234,24 @@ export const App: React.FC = () => {
 
   // Change chapter in reader
   const handleSelectChapter = async (chapterNumber: number, autoStartListen: boolean = false) => {
-    setCurrentChapterNumber(chapterNumber);
+    const chNum = Number(chapterNumber);
+    setCurrentChapterNumber(chNum);
     if (!activeStory) return;
 
     // Calculate progress
     const progressPercent = activeStoryChapters.length > 0
-      ? Math.round((chapterNumber / activeStoryChapters.length) * 100)
+      ? Math.round((chNum / activeStoryChapters.length) * 100)
       : 0;
 
     await db.stories.update(activeStory.id, {
-      currentChapterNumber: chapterNumber,
+      currentChapterNumber: chNum,
       currentProgressPercent: progressPercent,
       lastReadAt: Date.now()
     });
 
     const updatedStory: Story = {
       ...activeStory,
-      currentChapterNumber: chapterNumber,
+      currentChapterNumber: chNum,
       currentProgressPercent: progressPercent,
       lastReadAt: Date.now()
     };
@@ -252,9 +259,9 @@ export const App: React.FC = () => {
     setStories(prev => prev.map(s => s.id === activeStory.id ? updatedStory : s));
     supabaseSync.pushStoryProgress(updatedStory);
 
-    let chapter = activeStoryChapters.find(c => c.chapterNumber === chapterNumber);
-    if (chapter && (!chapter.content || chapter.content.trim().length === 0)) {
-      const full = await db.getChapter(activeStory.id, chapterNumber);
+    let chapter = activeStoryChapters.find(c => Number(c.chapterNumber) === chNum);
+    if (!chapter || !chapter.content || chapter.content.trim().length === 0) {
+      const full = await db.getChapter(activeStory.id, chNum);
       if (full && full.content) {
         chapter = full;
       }
@@ -268,7 +275,7 @@ export const App: React.FC = () => {
           chapterTitle: chapter.title,
           coverUrl: activeStory.coverUrl,
           storyId: activeStory.id,
-          chapterNumber: chapter.chapterNumber
+          chapterNumber: Number(chapter.chapterNumber)
         },
         0,
         true

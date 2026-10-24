@@ -1,4 +1,4 @@
-import type { TTSSettings, TTSEngineType } from '../../types';
+import type { TTSSettings, TTSEngineType, Chapter } from '../../types';
 import { getApiBase } from '../apiConfig';
 import { db } from '../db';
 import { pronunciationService } from './pronunciation';
@@ -795,11 +795,17 @@ class TTSEngine {
     }
   }
 
-  public nextSentence() {
+  public async nextSentence() {
     if (this.currentSentenceIndex < this.sentences.length - 1) {
       this.jumpToSentence(this.currentSentenceIndex + 1);
     } else {
       // Reached the end of the chapter
+      if (this.settings.autoNextChapter !== false) {
+        const advanced = await this.advanceToNextChapter();
+        if (advanced) {
+          return;
+        }
+      }
       this.stop();
       this.listeners.forEach(l => l.onChapterComplete?.());
     }
@@ -1138,6 +1144,12 @@ class TTSEngine {
 
     // Check if we reached the end of the chapter
     if (this.currentSentenceIndex >= this.sentences.length) {
+      if (this.settings.autoNextChapter !== false) {
+        const advanced = await this.advanceToNextChapter();
+        if (advanced) {
+          return;
+        }
+      }
       this.stop();
       this.clearAudioBlobCache();
       this.listeners.forEach(l => l.onChapterComplete?.());
@@ -1348,33 +1360,58 @@ class TTSEngine {
     try {
       const chapters = await db.getStoryChapters(this.currentStoryId);
       if (!chapters || chapters.length === 0) return false;
-      const nextChapterNum = (this.currentChapterNumber || 1) + 1;
-      let nextChapter = await db.getChapter(this.currentStoryId, nextChapterNum);
-      if (!nextChapter) {
-        nextChapter = chapters.find(c => c.chapterNumber === nextChapterNum);
+
+      const currentNum = Number(this.currentChapterNumber) || 1;
+      const currentIdx = chapters.findIndex(c => Number(c.chapterNumber) === currentNum);
+
+      let nextChapter: Chapter | undefined;
+      if (currentIdx >= 0 && currentIdx < chapters.length - 1) {
+        nextChapter = chapters[currentIdx + 1];
+      } else {
+        // Fallback: search for first chapter with chapterNumber > currentNum
+        nextChapter = chapters.find(c => Number(c.chapterNumber) > currentNum);
       }
-      if (!nextChapter || !nextChapter.content || !nextChapter.content.trim()) {
+
+      if (!nextChapter) {
+        console.log('Reached the final chapter of the story');
         return false;
       }
 
-      // Update story progress in DB
-      const progressPercent = Math.round((nextChapterNum / chapters.length) * 100);
+      // Ensure content is loaded (check db.getChapter if content is missing)
+      let fullChapter = nextChapter;
+      if (!fullChapter.content || !fullChapter.content.trim()) {
+        const fromDb = await db.getChapter(this.currentStoryId, Number(nextChapter.chapterNumber));
+        if (fromDb && fromDb.content && fromDb.content.trim()) {
+          fullChapter = fromDb;
+        }
+      }
+
+      if (!fullChapter.content || !fullChapter.content.trim()) {
+        console.warn('Next chapter has no readable text content:', nextChapter.chapterNumber);
+        return false;
+      }
+
+      const nextNum = Number(fullChapter.chapterNumber);
+      const progressPercent = Math.round((nextNum / chapters.length) * 100);
+
+      // Persist progress to DB
       await db.stories.update(this.currentStoryId, {
-        currentChapterNumber: nextChapterNum,
+        currentChapterNumber: nextNum,
         currentProgressPercent: progressPercent,
         currentSentenceIndex: 0,
         lastReadAt: Date.now()
       });
 
+      // Load chapter with keepPlaying = true
       this.loadChapter(
-        nextChapter.content,
+        fullChapter.content,
         {
           title: this.currentBookTitle,
           author: this.currentAuthor,
-          chapterTitle: nextChapter.title,
+          chapterTitle: fullChapter.title,
           coverUrl: this.currentCoverUrl,
           storyId: this.currentStoryId,
-          chapterNumber: nextChapter.chapterNumber
+          chapterNumber: nextNum
         },
         0,
         true
@@ -1392,34 +1429,48 @@ class TTSEngine {
     try {
       const chapters = await db.getStoryChapters(this.currentStoryId);
       if (!chapters || chapters.length === 0) return false;
-      const prevChapterNum = (this.currentChapterNumber || 1) - 1;
-      if (prevChapterNum < 1) return false;
-      let prevChapter = await db.getChapter(this.currentStoryId, prevChapterNum);
-      if (!prevChapter) {
-        prevChapter = chapters.find(c => c.chapterNumber === prevChapterNum);
-      }
-      if (!prevChapter || !prevChapter.content || !prevChapter.content.trim()) {
-        return false;
+
+      const currentNum = Number(this.currentChapterNumber) || 1;
+      const currentIdx = chapters.findIndex(c => Number(c.chapterNumber) === currentNum);
+
+      let prevChapter: Chapter | undefined;
+      if (currentIdx > 0) {
+        prevChapter = chapters[currentIdx - 1];
+      } else {
+        prevChapter = chapters.find(c => Number(c.chapterNumber) < currentNum);
       }
 
-      // Update story progress in DB
-      const progressPercent = Math.round((prevChapterNum / chapters.length) * 100);
+      if (!prevChapter) return false;
+
+      let fullChapter = prevChapter;
+      if (!fullChapter.content || !fullChapter.content.trim()) {
+        const fromDb = await db.getChapter(this.currentStoryId, Number(prevChapter.chapterNumber));
+        if (fromDb && fromDb.content && fromDb.content.trim()) {
+          fullChapter = fromDb;
+        }
+      }
+
+      if (!fullChapter.content || !fullChapter.content.trim()) return false;
+
+      const prevNum = Number(fullChapter.chapterNumber);
+      const progressPercent = Math.round((prevNum / chapters.length) * 100);
+
       await db.stories.update(this.currentStoryId, {
-        currentChapterNumber: prevChapterNum,
+        currentChapterNumber: prevNum,
         currentProgressPercent: progressPercent,
         currentSentenceIndex: 0,
         lastReadAt: Date.now()
       });
 
       this.loadChapter(
-        prevChapter.content,
+        fullChapter.content,
         {
           title: this.currentBookTitle,
           author: this.currentAuthor,
-          chapterTitle: prevChapter.title,
+          chapterTitle: fullChapter.title,
           coverUrl: this.currentCoverUrl,
           storyId: this.currentStoryId,
-          chapterNumber: prevChapter.chapterNumber
+          chapterNumber: prevNum
         },
         0,
         true
@@ -1432,7 +1483,13 @@ class TTSEngine {
     }
   }
 
-  public onNativeChapterComplete() {
+  public async onNativeChapterComplete() {
+    if (this.settings.autoNextChapter !== false) {
+      const advanced = await this.advanceToNextChapter();
+      if (advanced) {
+        return;
+      }
+    }
     this.notifyState('idle');
     this.listeners.forEach(l => l.onChapterComplete?.());
   }

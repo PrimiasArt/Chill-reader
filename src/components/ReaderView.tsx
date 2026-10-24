@@ -77,7 +77,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   activeSentenceIndex,
   onReloadChapters
 }) => {
-  const currentChapter = chapters.find(c => c.chapterNumber === currentChapterNumber) || chapters[0];
+  const currentChapter = chapters.find(c => Number(c.chapterNumber) === Number(currentChapterNumber)) || chapters[0];
   const hasContent = Boolean(currentChapter && currentChapter.content && currentChapter.content.trim().length > 0);
   
   // UI states
@@ -368,7 +368,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   // Auto-scroll TOC drawer to current chapter when drawer opens
   useEffect(() => {
     if (showTocDrawer) {
-      const idx = filteredChapters.findIndex(c => c.chapterNumber === currentChapterNumber);
+      const idx = filteredChapters.findIndex(c => Number(c.chapterNumber) === Number(currentChapterNumber));
       if (idx >= 0 && tocContainerRef.current) {
         const timer = setTimeout(() => {
           if (tocContainerRef.current) {
@@ -1066,10 +1066,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           {/* Chapter Bottom Navigation */}
           <div className="mt-16 pt-8 border-t border-current opacity-20 flex items-center justify-between gap-4">
             <button
-              disabled={currentChapterNumber <= 1}
+              disabled={Number(currentChapterNumber) <= 1}
               onClick={(e) => {
                 e.stopPropagation();
-                handleChapterChange(currentChapterNumber - 1);
+                handleChapterChange(Number(currentChapterNumber) - 1);
               }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
             >
@@ -1082,10 +1082,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             </span>
 
             <button
-              disabled={currentChapterNumber >= chapters.length}
+              disabled={Number(currentChapterNumber) >= chapters.length}
               onClick={(e) => {
                 e.stopPropagation();
-                handleChapterChange(currentChapterNumber + 1);
+                handleChapterChange(Number(currentChapterNumber) + 1);
               }}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-current opacity-80 hover:opacity-100 text-zinc-950 font-medium text-xs disabled:opacity-20 cursor-pointer"
             >
@@ -1126,8 +1126,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           {/* Quick Control Pills */}
           <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-white/5">
             <button
-              disabled={currentChapterNumber <= 1}
-              onClick={() => handleChapterChange(currentChapterNumber - 1)}
+              disabled={Number(currentChapterNumber) <= 1}
+              onClick={() => handleChapterChange(Number(currentChapterNumber) - 1)}
               className="p-2 rounded-xl text-zinc-300 hover:text-white hover:bg-white/10 disabled:opacity-25 transition-all cursor-pointer"
               title="Chương trước"
             >
@@ -1189,8 +1189,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             </button>
 
             <button
-              disabled={currentChapterNumber >= chapters.length}
-              onClick={() => handleChapterChange(currentChapterNumber + 1)}
+              disabled={Number(currentChapterNumber) >= chapters.length}
+              onClick={() => handleChapterChange(Number(currentChapterNumber) + 1)}
               className="p-2 rounded-xl text-zinc-300 hover:text-white hover:bg-white/10 disabled:opacity-25 transition-all cursor-pointer"
               title="Chương sau"
             >
@@ -1587,7 +1587,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                 <div style={{ height: `${totalHeight}px`, position: 'relative' }}>
                   {visibleChapters.map((ch, localIdx) => {
                     const actualIdx = startIndex + localIdx;
-                    const isCurrent = ch.chapterNumber === currentChapterNumber;
+                    const isCurrent = Number(ch.chapterNumber) === Number(currentChapterNumber);
                     return (
                       <button
                         key={ch.id}

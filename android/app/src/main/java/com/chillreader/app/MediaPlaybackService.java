@@ -1768,6 +1768,14 @@ public class MediaPlaybackService extends Service {
 
     public void jumpToNativeSentence(int index) {
         if (!isNativeTtsMode || nativeSentences.isEmpty()) return;
+        if (index >= nativeSentences.size()) {
+            MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.advanceToNextChapter && window.ttsEngine.advanceToNextChapter()");
+            return;
+        }
+        if (index < 0) {
+            MainActivity.sendCommand("window.ttsEngine && window.ttsEngine.advanceToPreviousChapter && window.ttsEngine.advanceToPreviousChapter()");
+            return;
+        }
         cancelTtsWatchdog();
         currentOnlineSentenceToken++;
         if (onlinePlayer != null) {
