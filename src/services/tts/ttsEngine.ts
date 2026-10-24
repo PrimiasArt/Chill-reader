@@ -30,6 +30,42 @@ export const CURATED_VOICES: VoiceOption[] = [];
 
 const getTtsApiBase = () => getApiBase();
 
+export function detectVoiceGender(voiceName: string, voiceURI?: string): 'male' | 'female' {
+  const s = ((voiceName || '') + ' ' + (voiceURI || '')).toLowerCase();
+  // Strip out "vietnam" and "vietnamese" so substring "nam" does not falsely match as male
+  const stripped = s
+    .replace(/vietnamese/gi, '')
+    .replace(/vietnam/gi, '')
+    .replace(/vi-vn/gi, '');
+
+  if (
+    stripped.includes('hoaimy') ||
+    stripped.includes('hoài my') ||
+    stripped.includes('google') ||
+    stripped.includes('gft') ||
+    stripped.includes('linh') ||
+    stripped.includes('female') ||
+    stripped.includes('nữ') ||
+    stripped.includes('nu')
+  ) {
+    return 'female';
+  }
+
+  if (
+    stripped.includes('namminh') ||
+    stripped.includes('nam minh') ||
+    stripped.includes('male') ||
+    stripped.includes('nam') ||
+    stripped.includes('vid') ||
+    stripped.includes('vic') ||
+    stripped.includes('an')
+  ) {
+    return 'male';
+  }
+
+  return 'female';
+}
+
 class TTSEngine {
   private synth: SpeechSynthesis | null = null;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
@@ -296,12 +332,18 @@ class TTSEngine {
       v.name.toLowerCase().includes('vietnam') || 
       v.name.toLowerCase().includes('tiếng việt')
     );
-    // Sort Google voices to the top so that Chrome's "Google tiếng Việt" (exact Android TTS voice) is prioritized
+    // Prioritize Female voices first (Google tiếng Việt, Hoài My, Linh, etc.) over male voices
     vi.sort((a, b) => {
+      const aGender = detectVoiceGender(a.name, a.voiceURI);
+      const bGender = detectVoiceGender(b.name, b.voiceURI);
+      if (aGender === 'female' && bGender !== 'female') return -1;
+      if (aGender !== 'female' && bGender === 'female') return 1;
+
       const aG = a.name.toLowerCase().includes('google') || a.voiceURI.toLowerCase().includes('google');
       const bG = b.name.toLowerCase().includes('google') || b.voiceURI.toLowerCase().includes('google');
       if (aG && !bG) return -1;
       if (!aG && bG) return 1;
+
       return 0;
     });
     return vi;
@@ -325,12 +367,9 @@ class TTSEngine {
       if (exact) return exact;
     }
 
-    // 2. Look for Google Vietnamese voice first (identically matching Android's default Google TTS)
-    const googleVi = viVoices.find(v => 
-      v.name.toLowerCase().includes('google') || 
-      v.voiceURI.toLowerCase().includes('google')
-    );
-    if (googleVi) return googleVi;
+    // 2. Look for Female Vietnamese voice first (Google tiếng Việt, Hoài My, Linh...)
+    const femaleVi = viVoices.find(v => detectVoiceGender(v.name, v.voiceURI) === 'female');
+    if (femaleVi) return femaleVi;
 
     // 3. Fallback to any available Vietnamese voice in browser
     if (viVoices.length > 0) {
@@ -348,14 +387,14 @@ class TTSEngine {
     list.push({
       id: 'native:android',
       name: isNativeAndroidApp 
-        ? 'Giọng đọc Máy Android (100% Offline Mặc định)'
-        : 'Google Tiếng Việt (Giọng chuẩn máy Android)',
+        ? 'Giọng đọc Máy Android (Nữ · 100% Offline Mặc định)'
+        : 'Google Tiếng Việt (Giọng Nữ chuẩn Android)',
       category: 'native',
-      gender: 'neutral',
-      badge: isNativeAndroidApp ? '100% Offline · Không mạng' : 'Chuẩn giọng Android · Chrome/Web',
+      gender: 'female',
+      badge: isNativeAndroidApp ? '100% Offline · Nữ' : 'Chuẩn giọng Android · Nữ',
       description: isNativeAndroidApp
         ? 'Giọng đọc ngoại tuyến có sẵn trên điện thoại, đọc mượt mà không cần mạng Internet'
-        : 'Giọng đọc Google chuẩn giống hệt trên điện thoại Android, chạy tối ưu trên Chrome/Web',
+        : 'Giọng đọc Google chuẩn giống hệt trên điện thoại Android, giọng Nữ êm ái',
       isOnline: false
     });
 
@@ -372,16 +411,15 @@ class TTSEngine {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) {
             parsed.forEach((nv: any, idx: number) => {
-              const lower = (nv.name || '').toLowerCase();
-              const isMale = lower.includes('vic') || lower.includes('male') || lower.includes('nam') || lower.includes('vid');
+              const gender = detectVoiceGender(nv.name, nv.id);
               const isOffline = !nv.requiresNetwork;
               if (isOffline) {
                 list.push({
                   id: nv.id || `native:${nv.name}`,
-                  name: `Giọng máy ${isMale ? 'Nam' : 'Nữ'} #${idx + 1} (${nv.name})`,
+                  name: `Giọng máy ${gender === 'female' ? 'Nữ' : 'Nam'} #${idx + 1} (${nv.name})`,
                   category: 'native',
-                  gender: isMale ? 'male' : 'female',
-                  badge: '100% Offline · Máy',
+                  gender: gender,
+                  badge: gender === 'female' ? '100% Offline · Nữ' : '100% Offline · Nam',
                   description: `Gói giọng đọc Tiếng Việt offline trên máy (${nv.name})`,
                   isOnline: false
                 });
@@ -399,16 +437,26 @@ class TTSEngine {
       const rawId = bv.voiceURI || bv.name;
       const voiceId = rawId.startsWith('native:') ? rawId : `native:${rawId}`;
       if (list.some(item => item.id === voiceId || item.id === rawId)) return;
-      const lower = bv.name.toLowerCase();
-      const isMale = lower.includes('male') || lower.includes('nam') || lower.includes('an');
-      const isGoogle = lower.includes('google');
+      const gender = detectVoiceGender(bv.name, bv.voiceURI);
+      const isGoogle = bv.name.toLowerCase().includes('google');
+      const isHoaiMy = bv.name.toLowerCase().includes('hoaimy') || bv.name.toLowerCase().includes('hoài my');
+
+      let displayName = bv.name;
+      if (isGoogle) {
+        displayName = `Google Tiếng Việt (Nữ · ${bv.name})`;
+      } else if (isHoaiMy) {
+        displayName = `Hoài My (Nữ · ${bv.name})`;
+      } else {
+        displayName = `${bv.name} (${gender === 'female' ? 'Nữ' : 'Nam'})`;
+      }
+
       list.push({
         id: voiceId,
-        name: isGoogle ? `Google Tiếng Việt (${bv.name})` : bv.name,
+        name: displayName,
         category: 'browser',
-        gender: isMale ? 'male' : 'female',
-        badge: isGoogle ? 'Chuẩn Android · Trình duyệt' : 'Offline · Thiết bị',
-        description: `Giọng đọc có sẵn trên máy (${bv.lang})`,
+        gender: gender,
+        badge: gender === 'female' ? 'Giọng Nữ' : 'Giọng Nam',
+        description: `Giọng đọc có sẵn trên thiết bị (${bv.lang})`,
         isOnline: false
       });
     });

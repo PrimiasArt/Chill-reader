@@ -74,6 +74,22 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
   const [activeSettingTab, setActiveSettingTab] = useState<'speed' | 'voice' | 'ambient' | 'timer' | null>(null);
+  const [allVoices, setAllVoices] = useState<VoiceOption[]>(() => ttsEngine.getAllAvailableVoices());
+
+  useEffect(() => {
+    const updateVoices = () => {
+      setAllVoices(ttsEngine.getAllAvailableVoices());
+    };
+    updateVoices();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.addEventListener?.('voiceschanged', updateVoices);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.removeEventListener?.('voiceschanged', updateVoices);
+      }
+    };
+  }, []);
 
   if (ttsState === 'idle') return null;
 
@@ -98,23 +114,6 @@ export const TTSPlayerBar: React.FC<TTSPlayerBarProps> = ({
       setDownloadProgress(null);
     }
   };
-
-  const [allVoices, setAllVoices] = useState<VoiceOption[]>(() => ttsEngine.getAllAvailableVoices());
-
-  useEffect(() => {
-    const updateVoices = () => {
-      setAllVoices(ttsEngine.getAllAvailableVoices());
-    };
-    updateVoices();
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.addEventListener?.('voiceschanged', updateVoices);
-    }
-    return () => {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.removeEventListener?.('voiceschanged', updateVoices);
-      }
-    };
-  }, []);
 
   const progressPercent = totalSentences > 0 
     ? Math.min(100, Math.round(((sentenceIndex + 1) / totalSentences) * 100)) 

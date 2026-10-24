@@ -12,7 +12,10 @@ import {
   FileText,
   Trash2,
   Key,
-  FolderOpen
+  FolderOpen,
+  Settings,
+  RotateCw,
+  ExternalLink
 } from 'lucide-react';
 import { parseTxtContentAsync, type ParsedBook } from '../services/parser/txtParser';
 import { parseEpubFile } from '../services/parser/epubParser';
@@ -55,6 +58,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [geminiKey, setGeminiKey] = useState('');
   const [hasApiKey, setHasApiKey] = useState(false);
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash');
+  const [availableModels, setAvailableModels] = useState<string[]>([
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash'
+  ]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<{ current: number; total: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -67,9 +79,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         if (k && k.trim()) {
           setHasApiKey(true);
           setGeminiKey(k);
+          geminiSummaryService.fetchAvailableModels(k).then(mods => {
+            if (mods && mods.length > 0) setAvailableModels(mods);
+          });
         } else {
           setHasApiKey(false);
         }
+      });
+      geminiSummaryService.getModel().then((m) => {
+        if (m) setGeminiModel(m);
       });
     }
   }, [isOpen]);
@@ -163,9 +181,27 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const handleSaveGeminiKey = async () => {
     if (!geminiKey.trim()) return;
+    const finalModel = geminiModel.trim() || 'gemini-2.0-flash';
     await geminiSummaryService.saveApiKey(geminiKey.trim());
+    await geminiSummaryService.saveModel(finalModel);
     setHasApiKey(true);
     setShowKeyInput(false);
+  };
+
+  const handleRefreshModels = async () => {
+    if (!geminiKey.trim()) return;
+    setIsFetchingModels(true);
+    try {
+      const models = await geminiSummaryService.fetchAvailableModels(geminiKey.trim());
+      if (models && models.length > 0) {
+        setAvailableModels(models);
+        if (!models.includes(geminiModel)) {
+          setGeminiModel(models[0]);
+        }
+      }
+    } finally {
+      setIsFetchingModels(false);
+    }
   };
 
   const handleStartOCR = async () => {
@@ -381,31 +417,99 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           {!parsedData && activeTab === 'ocr' && (
             <div className="space-y-4">
               {/* API Key warning/prompt if not configured */}
-              {(!hasApiKey || showKeyInput) && (
-                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
-                  <div className="flex items-center gap-1.5 text-amber-400 text-xs font-semibold">
-                    <Key className="w-4 h-4" />
-                    Thiết lập Gemini Vision AI Key (Hoàn toàn miễn phí)
+              {(!hasApiKey || showKeyInput) ? (
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                  <div className="flex items-center justify-between text-amber-400 text-xs font-semibold">
+                    <span className="flex items-center gap-1.5">
+                      <Key className="w-4 h-4" />
+                      Cài đặt Gemini Vision AI (Miễn phí)
+                    </span>
+                    {hasApiKey && (
+                      <button type="button" onClick={() => setShowKeyInput(false)} className="text-zinc-400 hover:text-zinc-200">
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
-                  <p className="text-[11px] text-zinc-300">
-                    Nhận diện chữ từ ảnh sách sử dụng mô hình Google Gemini Vision AI. Bạn có thể lấy key miễn phí tại <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline text-amber-400">Google AI Studio</a>.
+                  <p className="text-[11px] text-zinc-300 leading-relaxed">
+                    Nhận diện chữ từ ảnh sử dụng Google Gemini AI. Lấy mã khóa miễn phí tại <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline text-amber-400 inline-flex items-center gap-0.5">Google AI Studio <ExternalLink className="w-3 h-3 inline" /></a>.
                   </p>
-                  <div className="flex gap-2">
+                  
+                  <div>
+                    <label className="text-[11px] text-zinc-400 mb-1 block">API Key:</label>
                     <input
                       type="password"
                       placeholder="Dán Gemini API Key của bạn tại đây..."
                       value={geminiKey}
                       onChange={(e) => setGeminiKey(e.target.value)}
-                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
                     />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] text-zinc-400 block">Mô hình AI:</label>
+                      <button
+                        type="button"
+                        onClick={handleRefreshModels}
+                        disabled={isFetchingModels || !geminiKey.trim()}
+                        className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+                      >
+                        <RotateCw className={`w-3 h-3 ${isFetchingModels ? 'animate-spin' : ''}`} />
+                        <span>Quét model từ Google</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        value={availableModels.includes(geminiModel) ? geminiModel : 'custom'}
+                        onChange={(e) => {
+                          if (e.target.value !== 'custom') {
+                            setGeminiModel(e.target.value);
+                          }
+                        }}
+                        className="bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                      >
+                        {availableModels.map(m => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                        <option value="custom">✏️ Tự gõ model khác...</option>
+                      </select>
+
+                      <input
+                        type="text"
+                        placeholder="Tên model (VD: gemini-2.0-flash...)"
+                        value={geminiModel}
+                        onChange={(e) => setGeminiModel(e.target.value)}
+                        className="bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
                     <button
+                      type="button"
                       onClick={handleSaveGeminiKey}
-                      disabled={!geminiKey.trim()}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500 text-zinc-950 text-xs font-semibold hover:bg-amber-400 disabled:opacity-50 cursor-pointer"
+                      disabled={!geminiKey.trim() || !geminiModel.trim()}
+                      className="px-4 py-1.5 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold hover:bg-amber-400 disabled:opacity-50 cursor-pointer shadow-md"
                     >
-                      Lưu Key
+                      Lưu cài đặt AI
                     </button>
                   </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
+                  <span className="flex items-center gap-1.5 text-emerald-400">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Gemini AI: <strong className="font-mono text-amber-300">{geminiModel}</strong></span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyInput(true)}
+                    className="text-zinc-400 hover:text-amber-400 flex items-center gap-1 text-[11px] cursor-pointer font-medium"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Đổi Model / Key</span>
+                  </button>
                 </div>
               )}
 

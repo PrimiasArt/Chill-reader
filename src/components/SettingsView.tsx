@@ -33,6 +33,8 @@ import { ttsEngine, type VoiceOption } from '../services/tts/ttsEngine';
 import { pronunciationService, type PronunciationRule } from '../services/tts/pronunciation';
 import { ambientAudioService, AMBIENT_SOUND_OPTIONS, type AmbientSoundType } from '../services/tts/ambientAudio';
 import { appUpdater, type UpdateState } from '../services/appUpdater';
+import { geminiSummaryService } from '../services/ai/geminiSummary';
+import { Bot, ExternalLink, RotateCw } from 'lucide-react';
 import { UpdateModal } from './UpdateModal';
 import type { ReaderSettings, TTSSettings } from '../types';
 
@@ -81,6 +83,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newPattern, setNewPattern] = useState('');
   const [newReplacement, setNewReplacement] = useState('');
   const [showAddRule, setShowAddRule] = useState(false);
+
+  // Gemini AI state
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash');
+  const [availableGeminiModels, setAvailableGeminiModels] = useState<string[]>([
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash'
+  ]);
+  const [isFetchingGeminiModels, setIsFetchingGeminiModels] = useState(false);
+  const [geminiSavedToast, setGeminiSavedToast] = useState(false);
 
   // Ambient sound state
   const [ambientType, setAmbientType] = useState<AmbientSoundType>(ambientAudioService.getType());
@@ -147,6 +162,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const t1 = setTimeout(checkNativeTts, 600);
     const t2 = setTimeout(checkNativeTts, 1800);
 
+    geminiSummaryService.getApiKey().then(k => {
+      if (k) {
+        setGeminiApiKey(k);
+        geminiSummaryService.fetchAvailableModels(k).then(mods => {
+          if (mods && mods.length > 0) setAvailableGeminiModels(mods);
+        });
+      }
+    });
+    geminiSummaryService.getModel().then(m => {
+      if (m) setGeminiModel(m);
+    });
+
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.onvoiceschanged = () => {
         checkNativeTts();
@@ -199,6 +226,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleDeleteRule = async (id: string) => {
     const updated = await pronunciationService.deleteRule(id);
     setPronRules(updated);
+  };
+
+  const handleSaveGeminiSettings = async () => {
+    await geminiSummaryService.saveApiKey(geminiApiKey.trim());
+    await geminiSummaryService.saveModel(geminiModel.trim() || 'gemini-2.0-flash');
+    setGeminiSavedToast(true);
+    setTimeout(() => setGeminiSavedToast(false), 2500);
+  };
+
+  const handleRefreshGeminiModels = async () => {
+    if (!geminiApiKey.trim()) return;
+    setIsFetchingGeminiModels(true);
+    try {
+      const models = await geminiSummaryService.fetchAvailableModels(geminiApiKey.trim());
+      if (models && models.length > 0) {
+        setAvailableGeminiModels(models);
+        if (!models.includes(geminiModel)) {
+          setGeminiModel(models[0]);
+        }
+      }
+    } finally {
+      setIsFetchingGeminiModels(false);
+    }
   };
 
   const handleResetRules = async () => {
@@ -1501,6 +1551,127 @@ create policy "Allow all personal operations on chapters" on user_chapters for a
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* GEMINI AI ACCORDION */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
+        <button
+          type="button"
+          onClick={() => toggleSection('ai')}
+          className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-zinc-800/40 transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+              <Bot className="w-5 h-5 text-amber-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-semibold text-sm text-zinc-100">Cấu hình Trợ lý AI (Google Gemini)</h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium">
+                  {geminiModel}
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 truncate">
+                Tự do tùy chọn mô hình AI (gemini-2.0-flash, gemini-1.5-pro...) & API Key miễn phí
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <ChevronDown className={`w-5 h-5 text-zinc-400 transition-transform duration-200 ${openSections.ai ? 'rotate-180 text-amber-400' : ''}`} />
+          </div>
+        </button>
+
+        {openSections.ai && (
+          <div className="p-5 pt-0 border-t border-zinc-800/80 space-y-4 animate-in fade-in duration-200">
+            <p className="text-xs text-zinc-400 pt-3 leading-relaxed">
+              Google Gemini hỗ trợ các tính năng cao cấp: Đàm đạo cùng Trợ lý truyện (Anti-Spoiler), Tóm tắt chương, Nhắc lại cốt truyện (Recap) và Nhận diện chữ từ ảnh sách (OCR). Nhận API Key hoàn toàn miễn phí tại <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-amber-400 underline font-medium inline-flex items-center gap-0.5">Google AI Studio <ExternalLink className="w-3 h-3 inline" /></a>.
+            </p>
+
+            <div className="space-y-3 bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/80">
+              <div>
+                <label className="text-xs font-semibold text-zinc-300 mb-1.5 block">Google Gemini API Key:</label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Dán API Key (AIzaSy...)"
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-amber-400 font-medium text-xs rounded-xl flex items-center gap-1.5 shrink-0"
+                  >
+                    <span>Lấy Key</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-zinc-300 block">Mô hình AI (Tự do chọn hoặc tự gõ model mới):</label>
+                  <button
+                    type="button"
+                    onClick={handleRefreshGeminiModels}
+                    disabled={isFetchingGeminiModels || !geminiApiKey.trim()}
+                    className="text-[11px] text-amber-400 hover:underline flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${isFetchingGeminiModels ? 'animate-spin' : ''}`} />
+                    <span>Quét model từ Google</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <select
+                    value={availableGeminiModels.includes(geminiModel) ? geminiModel : 'custom'}
+                    onChange={(e) => {
+                      if (e.target.value !== 'custom') {
+                        setGeminiModel(e.target.value);
+                      }
+                    }}
+                    className="bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:outline-none focus:border-amber-500"
+                  >
+                    {availableGeminiModels.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                    <option value="custom">✏️ Tự gõ tên model khác...</option>
+                  </select>
+
+                  <input
+                    type="text"
+                    placeholder="Tên model (VD: gemini-2.0-flash, gemini-1.5-pro...)"
+                    value={geminiModel}
+                    onChange={(e) => setGeminiModel(e.target.value)}
+                    className="bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  💡 Bạn có thể tự gõ bất kỳ tên model nào mà Google mới ra mắt để dùng ngay mà không cần chờ cập nhật ứng dụng.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <div>
+                  {geminiSavedToast && (
+                    <span className="text-xs text-emerald-400 font-medium flex items-center gap-1 animate-in fade-in">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã lưu cài đặt AI!
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveGeminiSettings}
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-xl transition-all cursor-pointer shadow-md"
+                >
+                  Lưu cấu hình AI
+                </button>
+              </div>
             </div>
           </div>
         )}

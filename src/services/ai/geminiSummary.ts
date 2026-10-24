@@ -33,6 +33,73 @@ export class GeminiSummaryService {
     }
   }
 
+  async getModel(): Promise<string> {
+    try {
+      const fromDb = await db.getSetting<string>('geminiModel', '');
+      if (fromDb && fromDb.trim()) return fromDb.trim();
+    } catch {}
+
+    if (typeof window !== 'undefined') {
+      const fromLocal = localStorage.getItem('chill_reader_gemini_model');
+      if (fromLocal && fromLocal.trim()) return fromLocal.trim();
+    }
+    return 'gemini-2.0-flash';
+  }
+
+  async saveModel(model: string): Promise<void> {
+    const trimmed = model.trim() || 'gemini-2.0-flash';
+    try {
+      await db.saveSetting('geminiModel', trimmed);
+    } catch {}
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chill_reader_gemini_model', trimmed);
+    }
+  }
+
+  async fetchAvailableModels(providedKey?: string): Promise<string[]> {
+    const key = (providedKey || await this.getApiKey()).trim();
+    if (!key) {
+      return ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro', 'gemini-2.5-flash'];
+    }
+
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`, {
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data.models) && data.models.length > 0) {
+        const supported = data.models
+          .filter((m: any) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+          .map((m: any) => (m.name || '').replace(/^models\//, ''))
+          .filter((name: string) => name && !name.includes('embedding') && !name.includes('aqa'));
+
+        if (supported.length > 0) {
+          supported.sort((a: string, b: string) => {
+            const score = (name: string) => {
+              if (name === 'gemini-2.0-flash') return 100;
+              if (name === 'gemini-2.0-flash-lite') return 90;
+              if (name === 'gemini-1.5-flash') return 80;
+              if (name === 'gemini-1.5-flash-latest') return 75;
+              if (name === 'gemini-1.5-pro') return 70;
+              if (name.includes('flash')) return 60;
+              if (name.includes('pro')) return 50;
+              return 10;
+            };
+            return score(b) - score(a);
+          });
+          return supported;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch available models from Gemini API:', e);
+    }
+
+    return ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro', 'gemini-2.5-flash'];
+  }
+
   /**
    * Summarize current chapter using Gemini API
    */
@@ -159,12 +226,21 @@ QUY TẮC BẢO MẬT & ĐẠO ĐỨC ĐỌC SÁCH TUYỆT ĐỐI (ANTI-SPOILER)
     return text;
   }
 
-  private async callGeminiApi(apiKey: string, prompt: string): Promise<string> {
-    // Attempt gemini-2.5-flash first, fallback to gemini-1.5-flash
-    const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  private async callGeminiApi(apiKey: string, prompt: string, modelOverride?: string): Promise<string> {
+    const preferredModel = (modelOverride || await this.getModel()).trim() || 'gemini-2.0-flash';
+    
+    // Candidate list: user's chosen model first, then safe fallbacks
+    const candidateModels: string[] = [preferredModel];
+    const fallbackList = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro', 'gemini-2.5-flash'];
+    for (const f of fallbackList) {
+      if (!candidateModels.includes(f)) {
+        candidateModels.push(f);
+      }
+    }
+
     let lastError: any = null;
 
-    for (const model of models) {
+    for (const model of candidateModels) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
         const response = await fetch(url, {
@@ -196,19 +272,23 @@ QUY TẮC BẢO MẬT & ĐẠO ĐỨC ĐỌC SÁCH TUYỆT ĐỐI (ANTI-SPOILER)
         if (candidateText && candidateText.trim()) {
           return candidateText.trim();
         }
-      } catch (err) {
+      } catch (err: any) {
         lastError = err;
-        console.warn(`Gemini model ${model} failed, trying fallback...`, err);
+        console.warn(`Gemini model ${model} failed, trying next candidate...`, err);
+        const msg = String(err?.message || '');
+        if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+          throw new Error('API Key không hợp lệ. Vui lòng kiểm tra lại Google Gemini API Key.');
+        }
       }
     }
 
-    throw new Error(lastError?.message || 'Không nhận được phản hồi từ AI Gemini. Vui lòng kiểm tra lại API Key và kết nối mạng.');
+    throw new Error(lastError?.message || `Không nhận được phản hồi từ AI Gemini (Model: ${preferredModel}). Vui lòng kiểm tra lại API Key hoặc đổi Model khác trong cài đặt.`);
   }
 
   /**
    * OCR text from image using Gemini Vision AI (supports camera photos, book scans, screenshots)
    */
-  async ocrImageToText(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<string> {
+  async ocrImageToText(imageBase64: string, mimeType: string = 'image/jpeg', modelOverride?: string): Promise<string> {
     const apiKey = await this.getApiKey();
     if (!apiKey) {
       throw new Error('Chưa thiết lập Google Gemini API Key. Vui lòng nhập API Key miễn phí của bạn để sử dụng tính năng OCR chụp ảnh nhận diện chữ.');
@@ -229,10 +309,18 @@ Yêu cầu định dạng:
 3. Tự động sửa các lỗi chính tả hiển nhiên do chụp nghiêng, mờ nét hoặc bóng đổ (nếu có căn cứ ngữ cảnh câu từ rõ ràng).
 4. TUYỆT ĐỐI KHÔNG thêm lời giải thích, KHÔNG thêm lời chào, KHÔNG bọc trong khối code markdown (như \`\`\`text), CHỈ TRẢ VỀ DUY NHẤT nội dung văn bản đã được bóc tách từ ảnh.`;
 
-    const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+    const preferredModel = (modelOverride || await this.getModel()).trim() || 'gemini-2.0-flash';
+    const candidateModels: string[] = [preferredModel];
+    const fallbackList = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro', 'gemini-2.5-flash'];
+    for (const f of fallbackList) {
+      if (!candidateModels.includes(f)) {
+        candidateModels.push(f);
+      }
+    }
+
     let lastError: any = null;
 
-    for (const model of models) {
+    for (const model of candidateModels) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
         const response = await fetch(url, {
@@ -283,7 +371,7 @@ Yêu cầu định dạng:
       }
     }
 
-    throw new Error(lastError?.message || 'Không thể trích xuất văn bản từ ảnh qua AI Gemini. Vui lòng kiểm tra lại API Key và kết nối mạng.');
+    throw new Error(lastError?.message || `Không thể trích xuất văn bản từ ảnh qua AI Gemini (Model: ${preferredModel}). Vui lòng kiểm tra lại hoặc đổi Model trong cài đặt.`);
   }
 
   /**

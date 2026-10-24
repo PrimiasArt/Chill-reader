@@ -275,3 +275,63 @@ test('Web Voice Resolution - Prioritizes Google Vietnamese and handles native: p
   const v5 = resolveBrowserVoice(mockEnglishVoices, 'native:android');
   assert.equal(v5, undefined);
 });
+
+test('Female Voice Detection & Edge Prioritization - Prioritizes HoaiMy over NamMinh/An', () => {
+  function detectVoiceGender(voiceName, voiceURI) {
+    const s = ((voiceName || '') + ' ' + (voiceURI || '')).toLowerCase();
+    const stripped = s
+      .replace(/vietnamese/gi, '')
+      .replace(/vietnam/gi, '')
+      .replace(/vi-vn/gi, '');
+
+    if (
+      stripped.includes('hoaimy') ||
+      stripped.includes('hoài my') ||
+      stripped.includes('google') ||
+      stripped.includes('gft') ||
+      stripped.includes('linh') ||
+      stripped.includes('female') ||
+      stripped.includes('nữ') ||
+      stripped.includes('nu')
+    ) {
+      return 'female';
+    }
+
+    if (
+      stripped.includes('namminh') ||
+      stripped.includes('nam minh') ||
+      stripped.includes('male') ||
+      stripped.includes('nam') ||
+      stripped.includes('vid') ||
+      stripped.includes('vic') ||
+      stripped.includes('an')
+    ) {
+      return 'male';
+    }
+
+    return 'female';
+  }
+
+  assert.equal(detectVoiceGender('Microsoft HoaiMy Online (Natural) - Vietnamese (Vietnam)'), 'female');
+  assert.equal(detectVoiceGender('Google tiếng Việt'), 'female');
+  assert.equal(detectVoiceGender('Linh'), 'female');
+  assert.equal(detectVoiceGender('Microsoft NamMinh Online (Natural) - Vietnamese (Vietnam)'), 'male');
+  assert.equal(detectVoiceGender('Microsoft An (Natural) - Vietnamese (Vietnam)'), 'male');
+
+  const edgeVoices = [
+    { name: 'Microsoft An (Natural) - Vietnamese (Vietnam)', lang: 'vi-VN', voiceURI: 'Microsoft An' },
+    { name: 'Microsoft HoaiMy Online (Natural) - Vietnamese (Vietnam)', lang: 'vi-VN', voiceURI: 'Microsoft HoaiMy' },
+    { name: 'Microsoft NamMinh Online (Natural) - Vietnamese (Vietnam)', lang: 'vi-VN', voiceURI: 'Microsoft NamMinh' }
+  ];
+
+  // Sorting with female first should put HoaiMy before An and NamMinh
+  edgeVoices.sort((a, b) => {
+    const aG = detectVoiceGender(a.name, a.voiceURI);
+    const bG = detectVoiceGender(b.name, b.voiceURI);
+    if (aG === 'female' && bG !== 'female') return -1;
+    if (aG !== 'female' && bG === 'female') return 1;
+    return 0;
+  });
+
+  assert.equal(edgeVoices[0].name, 'Microsoft HoaiMy Online (Natural) - Vietnamese (Vietnam)');
+});

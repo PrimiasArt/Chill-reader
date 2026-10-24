@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, Sparkles, ShieldCheck, Loader2, Bot, User, Key } from 'lucide-react';
+import { X, Send, Sparkles, ShieldCheck, Loader2, Bot, User, Key, Settings, RotateCw, ExternalLink } from 'lucide-react';
 import { geminiSummaryService } from '../services/ai/geminiSummary';
 import type { Story, Chapter } from '../types';
 
@@ -8,6 +8,7 @@ interface Message {
   sender: 'user' | 'ai';
   text: string;
   time: string;
+  isError?: boolean;
 }
 
 interface StoryAiCompanionModalProps {
@@ -38,6 +39,16 @@ export const StoryAiCompanionModal: React.FC<StoryAiCompanionModalProps> = ({
   const [hasApiKey, setHasApiKey] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showKeySetup, setShowKeySetup] = useState(false);
+  const [currentModel, setCurrentModel] = useState('gemini-2.0-flash');
+  const [modelInput, setModelInput] = useState('gemini-2.0-flash');
+  const [availableModels, setAvailableModels] = useState<string[]>([
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash'
+  ]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -47,9 +58,18 @@ export const StoryAiCompanionModal: React.FC<StoryAiCompanionModalProps> = ({
         if (k && k.trim()) {
           setHasApiKey(true);
           setApiKeyInput(k);
+          geminiSummaryService.fetchAvailableModels(k).then((mods) => {
+            if (mods && mods.length > 0) setAvailableModels(mods);
+          });
         } else {
           setHasApiKey(false);
           setShowKeySetup(true);
+        }
+      });
+      geminiSummaryService.getModel().then((m) => {
+        if (m) {
+          setCurrentModel(m);
+          setModelInput(m);
         }
       });
 
@@ -73,11 +93,30 @@ export const StoryAiCompanionModal: React.FC<StoryAiCompanionModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSaveKey = async () => {
+  const handleSaveConfig = async () => {
     if (!apiKeyInput.trim()) return;
+    const finalModel = modelInput.trim() || 'gemini-2.0-flash';
     await geminiSummaryService.saveApiKey(apiKeyInput.trim());
+    await geminiSummaryService.saveModel(finalModel);
+    setCurrentModel(finalModel);
     setHasApiKey(true);
     setShowKeySetup(false);
+  };
+
+  const handleRefreshModels = async () => {
+    if (!apiKeyInput.trim()) return;
+    setIsFetchingModels(true);
+    try {
+      const models = await geminiSummaryService.fetchAvailableModels(apiKeyInput.trim());
+      if (models && models.length > 0) {
+        setAvailableModels(models);
+        if (!models.includes(modelInput)) {
+          setModelInput(models[0]);
+        }
+      }
+    } finally {
+      setIsFetchingModels(false);
+    }
   };
 
   const handleSend = async (questionToSend?: string) => {
@@ -127,8 +166,9 @@ export const StoryAiCompanionModal: React.FC<StoryAiCompanionModalProps> = ({
       const errorMsg: Message = {
         id: 'err_' + Date.now(),
         sender: 'ai',
-        text: `⚠️ Không thể phản hồi: ${err.message || 'Lỗi kết nối AI Gemini'}. Vui lòng thử lại!`,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        text: `⚠️ Không thể phản hồi: ${err.message || 'Lỗi kết nối AI Gemini'}. Bạn có thể bấm nút đổi Model hoặc kiểm tra lại API Key bên dưới!`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isError: true
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -149,11 +189,19 @@ export const StoryAiCompanionModal: React.FC<StoryAiCompanionModalProps> = ({
               <Bot className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <h3 className="font-bold text-sm text-zinc-100">Đàm Đạo Cùng Trợ Lý AI</h3>
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Cao Cấp
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {currentModel}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setShowKeySetup(!showKeySetup)}
+                  className="p-1 rounded-md text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 transition-colors cursor-pointer"
+                  title="Cài đặt Model & API Key"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
               </div>
               <p className="text-[11px] text-zinc-400 truncate max-w-[280px] sm:max-w-md">
                 Chương {currentChapter.chapterNumber}: {currentChapter.title}
@@ -174,33 +222,94 @@ export const StoryAiCompanionModal: React.FC<StoryAiCompanionModalProps> = ({
           <span>Cam kết Anti-Spoiler: AI chỉ trả lời dựa trên diễn biến đến <strong>Chương {currentChapter.chapterNumber}</strong>, không tiết lộ tương lai!</span>
         </div>
 
-        {/* API Key Banner if needed */}
+        {/* API Key & Model Setup Banner */}
         {showKeySetup && (
-          <div className="p-3 bg-amber-500/10 border-b border-amber-500/30 flex flex-col gap-1.5 text-xs text-zinc-300">
+          <div className="p-3.5 bg-zinc-900 border-b border-amber-500/30 flex flex-col gap-2.5 text-xs text-zinc-300 animate-in fade-in duration-200">
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-amber-400 flex items-center gap-1">
-                <Key className="w-3.5 h-3.5" /> Nhập Google Gemini API Key (Miễn phí)
+              <span className="font-semibold text-amber-400 flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5" /> Cài đặt Google Gemini AI
               </span>
               {hasApiKey && (
-                <button onClick={() => setShowKeySetup(false)} className="text-zinc-400 hover:text-zinc-200">
+                <button onClick={() => setShowKeySetup(false)} className="text-zinc-400 hover:text-zinc-200 cursor-pointer">
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                placeholder="Dán Gemini API Key của bạn..."
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
-              />
+
+            {/* API Key Input */}
+            <div>
+              <label className="text-[11px] text-zinc-400 mb-1 block">Google Gemini API Key:</label>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  placeholder="Dán Gemini API Key của bạn (AIzaSy...)"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                />
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-amber-400 rounded-lg text-[11px] flex items-center gap-1 shrink-0 font-medium"
+                >
+                  <span>Lấy Key</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+
+            {/* Model Selection & Custom Model Input */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] text-zinc-400 block">Mô hình AI (Tự do chọn hoặc tự gõ tên model mới):</label>
+                <button
+                  type="button"
+                  onClick={handleRefreshModels}
+                  disabled={isFetchingModels || !apiKeyInput.trim()}
+                  className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+                >
+                  <RotateCw className={`w-3 h-3 ${isFetchingModels ? 'animate-spin' : ''}`} />
+                  <span>Quét model từ Google</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Select from list */}
+                <select
+                  value={availableModels.includes(modelInput) ? modelInput : 'custom'}
+                  onChange={(e) => {
+                    if (e.target.value !== 'custom') {
+                      setModelInput(e.target.value);
+                    }
+                  }}
+                  className="bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                >
+                  {availableModels.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="custom">✏️ Tự gõ tên model khác...</option>
+                </select>
+
+                {/* Custom / direct edit text input */}
+                <input
+                  type="text"
+                  placeholder="Tên model (VD: gemini-2.0-flash, gemini-1.5-pro...)"
+                  value={modelInput}
+                  onChange={(e) => setModelInput(e.target.value)}
+                  className="bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
               <button
-                onClick={handleSaveKey}
-                disabled={!apiKeyInput.trim()}
-                className="px-3 py-1 rounded-lg bg-amber-500 text-zinc-950 text-xs font-semibold hover:bg-amber-400 disabled:opacity-50 cursor-pointer"
+                type="button"
+                onClick={handleSaveConfig}
+                disabled={!apiKeyInput.trim() || !modelInput.trim()}
+                className="px-4 py-1.5 rounded-lg bg-amber-500 text-zinc-950 text-xs font-bold hover:bg-amber-400 disabled:opacity-50 cursor-pointer shadow-md"
               >
-                Lưu
+                Lưu cài đặt AI
               </button>
             </div>
           </div>
@@ -229,10 +338,24 @@ export const StoryAiCompanionModal: React.FC<StoryAiCompanionModalProps> = ({
                 className={`p-3 rounded-2xl text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap ${
                   msg.sender === 'user'
                     ? 'bg-amber-500 text-zinc-950 font-medium rounded-tr-none'
+                    : msg.isError
+                    ? 'bg-red-500/10 text-red-200 border border-red-500/30 rounded-tl-none shadow-sm'
                     : 'bg-zinc-800/90 text-zinc-200 border border-zinc-700/60 rounded-tl-none shadow-sm'
                 }`}
               >
                 {msg.text}
+
+                {msg.isError && (
+                  <button
+                    type="button"
+                    onClick={() => setShowKeySetup(true)}
+                    className="mt-2.5 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 flex items-center gap-1.5 cursor-pointer font-medium text-xs transition-colors"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Đổi Model AI hoặc API Key</span>
+                  </button>
+                )}
+
                 <div
                   className={`text-[9px] mt-1 text-right opacity-60 ${
                     msg.sender === 'user' ? 'text-zinc-900' : 'text-zinc-400'

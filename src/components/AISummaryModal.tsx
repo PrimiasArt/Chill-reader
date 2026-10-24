@@ -9,7 +9,9 @@ import {
   Check, 
   Copy, 
   ExternalLink,
-  AlertCircle
+  AlertCircle,
+  Settings,
+  RotateCw
 } from 'lucide-react';
 import { geminiSummaryService } from '../services/ai/geminiSummary';
 import type { Chapter } from '../types';
@@ -34,6 +36,16 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [keyInput, setKeyInput] = useState('');
   const [showKeyConfig, setShowKeyConfig] = useState(false);
+  const [currentModel, setCurrentModel] = useState<string>('gemini-2.0-flash');
+  const [modelInput, setModelInput] = useState<string>('gemini-2.0-flash');
+  const [availableModels, setAvailableModels] = useState<string[]>([
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+    'gemini-2.5-flash'
+  ]);
+  const [isFetchingModels, setIsFetchingModels] = useState<boolean>(false);
 
   // Results
   const [chapterSummary, setChapterSummary] = useState<string | null>(null);
@@ -53,6 +65,15 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
           setShowKeyConfig(true);
         } else {
           setShowKeyConfig(false);
+          geminiSummaryService.fetchAvailableModels(k).then((mods) => {
+            if (mods && mods.length > 0) setAvailableModels(mods);
+          });
+        }
+      });
+      geminiSummaryService.getModel().then((m) => {
+        if (m) {
+          setCurrentModel(m);
+          setModelInput(m);
         }
       });
     }
@@ -63,11 +84,30 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
   const handleSaveKey = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!keyInput.trim()) return;
+    const finalModel = modelInput.trim() || 'gemini-2.0-flash';
     await geminiSummaryService.saveApiKey(keyInput.trim());
+    await geminiSummaryService.saveModel(finalModel);
     setApiKey(keyInput.trim());
+    setCurrentModel(finalModel);
     setHasApiKey(true);
     setShowKeyConfig(false);
     setError(null);
+  };
+
+  const handleRefreshModels = async () => {
+    if (!keyInput.trim()) return;
+    setIsFetchingModels(true);
+    try {
+      const models = await geminiSummaryService.fetchAvailableModels(keyInput.trim());
+      if (models && models.length > 0) {
+        setAvailableModels(models);
+        if (!models.includes(modelInput)) {
+          setModelInput(models[0]);
+        }
+      }
+    } finally {
+      setIsFetchingModels(false);
+    }
   };
 
   const handleGenerateChapterSummary = async () => {
@@ -138,8 +178,8 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
             <div>
               <h3 className="font-bold text-sm sm:text-base text-zinc-100 flex items-center gap-2">
                 Trợ Lý Cốt Truyện AI
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500/20 to-amber-400/20 text-amber-300 border border-amber-500/30">
-                  Gemini Flash
+                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {currentModel}
                 </span>
               </h3>
               <p className="text-[11px] text-zinc-400 truncate max-w-xs sm:max-w-md">
@@ -168,20 +208,78 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
               </div>
             </div>
 
-            <form onSubmit={handleSaveKey} className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="password"
-                placeholder="Dán AI Studio API Key (AIzaSy...)"
-                value={keyInput}
-                onChange={(e) => setKeyInput(e.target.value)}
-                className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-amber-500"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-xl transition-all cursor-pointer shrink-0"
-              >
-                Lưu cấu hình
-              </button>
+            <form onSubmit={handleSaveKey} className="space-y-3">
+              <div>
+                <label className="text-[11px] text-zinc-400 mb-1 block">Google Gemini API Key:</label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Dán AI Studio API Key (AIzaSy...)"
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-amber-500"
+                  />
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-2 bg-zinc-700 hover:bg-zinc-600 text-amber-300 font-medium text-xs rounded-xl flex items-center gap-1 shrink-0"
+                  >
+                    <span>Lấy Key</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] text-zinc-400 block">Mô hình AI (Tùy chọn hoặc tự gõ model mới):</label>
+                  <button
+                    type="button"
+                    onClick={handleRefreshModels}
+                    disabled={isFetchingModels || !keyInput.trim()}
+                    className="text-[10px] text-amber-400 hover:underline flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RotateCw className={`w-3 h-3 ${isFetchingModels ? 'animate-spin' : ''}`} />
+                    <span>Quét model từ Google</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    value={availableModels.includes(modelInput) ? modelInput : 'custom'}
+                    onChange={(e) => {
+                      if (e.target.value !== 'custom') {
+                        setModelInput(e.target.value);
+                      }
+                    }}
+                    className="bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-amber-500"
+                  >
+                    {availableModels.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                    <option value="custom">✏️ Tự gõ tên model khác...</option>
+                  </select>
+
+                  <input
+                    type="text"
+                    placeholder="Tên model (VD: gemini-2.0-flash...)"
+                    value={modelInput}
+                    onChange={(e) => setModelInput(e.target.value)}
+                    className="bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="submit"
+                  disabled={!keyInput.trim() || !modelInput.trim()}
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-xl transition-all cursor-pointer shrink-0 disabled:opacity-50 shadow-md"
+                >
+                  Lưu cấu hình AI
+                </button>
+              </div>
             </form>
 
             <div className="mt-2.5 flex items-center justify-between text-[11px]">
@@ -206,17 +304,17 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between py-1.5 px-2 text-[11px] text-zinc-400 border-b border-zinc-800/60 mb-2">
+          <div className="flex items-center justify-between py-1.5 px-2 text-[11px] text-zinc-400 border-b border-zinc-800/60 mb-2 flex-wrap gap-2">
             <span className="flex items-center gap-1.5 text-emerald-400">
               <Check className="w-3.5 h-3.5" />
-              <span>Đã kết nối Gemini API</span>
+              <span>Đã kết nối: <strong className="font-mono text-amber-300">{currentModel}</strong></span>
             </span>
             <button
               onClick={() => setShowKeyConfig(true)}
-              className="text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer flex items-center gap-1"
+              className="text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer flex items-center gap-1 font-medium"
             >
-              <Key className="w-3 h-3" />
-              <span>Đổi API Key</span>
+              <Settings className="w-3 h-3" />
+              <span>Đổi Model / API Key</span>
             </button>
           </div>
         )}
@@ -261,7 +359,15 @@ export const AISummaryModal: React.FC<AISummaryModalProps> = ({
               <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
               <div>
                 <p className="font-semibold">Lỗi yêu cầu AI:</p>
-                <p className="text-[11px] opacity-90 mt-0.5">{error}</p>
+                <p className="text-[11px] opacity-90 mt-0.5 leading-relaxed">{error}</p>
+                <button
+                  type="button"
+                  onClick={() => setShowKeyConfig(true)}
+                  className="mt-2.5 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 flex items-center gap-1.5 cursor-pointer font-medium text-[11px] transition-colors"
+                >
+                  <Settings className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Đổi Model AI hoặc API Key</span>
+                </button>
               </div>
             </div>
           )}
