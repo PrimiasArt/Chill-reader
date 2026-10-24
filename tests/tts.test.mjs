@@ -204,3 +204,74 @@ test('Offline Multi-key Cache Matching - Matches exact, normalized, or text-fall
   const playKeys2 = getCacheKeys('native:android', 1.2, 1.0, 'Trời hôm nay nhiều mây.');
   assert.equal(playKeys2.textFallback, savedKeys.textFallback, 'Text fallback matches regardless of voice or rate');
 });
+
+test('Web Voice Resolution - Prioritizes Google Vietnamese and handles native: prefix on Web', () => {
+  function resolveBrowserVoice(voices, preferredURI) {
+    if (!voices || voices.length === 0) return undefined;
+    const viVoices = voices.filter(v =>
+      v.lang.toLowerCase().startsWith('vi') ||
+      v.name.toLowerCase().includes('vietnam') ||
+      v.name.toLowerCase().includes('tiếng việt')
+    );
+    viVoices.sort((a, b) => {
+      const aG = a.name.toLowerCase().includes('google') || a.voiceURI.toLowerCase().includes('google');
+      const bG = b.name.toLowerCase().includes('google') || b.voiceURI.toLowerCase().includes('google');
+      if (aG && !bG) return -1;
+      if (!aG && bG) return 1;
+      return 0;
+    });
+
+    if (preferredURI && preferredURI !== 'native:android') {
+      const rawURI = preferredURI.startsWith('native:') ? preferredURI.substring(7) : preferredURI;
+      const exact = voices.find(v =>
+        v.voiceURI === preferredURI ||
+        v.voiceURI === rawURI ||
+        v.name === preferredURI ||
+        v.name === rawURI
+      );
+      if (exact) return exact;
+    }
+
+    const googleVi = viVoices.find(v =>
+      v.name.toLowerCase().includes('google') ||
+      v.voiceURI.toLowerCase().includes('google')
+    );
+    if (googleVi) return googleVi;
+
+    if (viVoices.length > 0) return viVoices[0];
+    return undefined;
+  }
+
+  const mockChromeVoices = [
+    { name: 'Google US English', lang: 'en-US', voiceURI: 'Google US English' },
+    { name: 'Google tiếng Việt', lang: 'vi-VN', voiceURI: 'Google tiếng Việt' },
+    { name: 'Microsoft An', lang: 'vi-VN', voiceURI: 'Microsoft An' }
+  ];
+
+  // Case 1: Default 'native:android' in Chrome picks 'Google tiếng Việt'
+  const v1 = resolveBrowserVoice(mockChromeVoices, 'native:android');
+  assert.equal(v1.name, 'Google tiếng Việt');
+
+  // Case 2: User picked 'native:Google tiếng Việt' with prefix
+  const v2 = resolveBrowserVoice(mockChromeVoices, 'native:Google tiếng Việt');
+  assert.equal(v2.name, 'Google tiếng Việt');
+
+  // Case 3: User picked specific voice 'native:Microsoft An'
+  const v3 = resolveBrowserVoice(mockChromeVoices, 'native:Microsoft An');
+  assert.equal(v3.name, 'Microsoft An');
+
+  // Case 4: Browser without Google voice (e.g. Edge with only Microsoft An)
+  const mockEdgeVoices = [
+    { name: 'Microsoft David', lang: 'en-US', voiceURI: 'Microsoft David' },
+    { name: 'Microsoft An', lang: 'vi-VN', voiceURI: 'Microsoft An' }
+  ];
+  const v4 = resolveBrowserVoice(mockEdgeVoices, 'native:android');
+  assert.equal(v4.name, 'Microsoft An');
+
+  // Case 5: Browser with no Vietnamese voices at all (returns undefined, triggering Google TTS stream)
+  const mockEnglishVoices = [
+    { name: 'Microsoft David', lang: 'en-US', voiceURI: 'Microsoft David' }
+  ];
+  const v5 = resolveBrowserVoice(mockEnglishVoices, 'native:android');
+  assert.equal(v5, undefined);
+});

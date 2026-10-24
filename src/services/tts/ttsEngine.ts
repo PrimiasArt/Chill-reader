@@ -82,6 +82,13 @@ class TTSEngine {
     if (typeof window !== 'undefined') {
       if ('speechSynthesis' in window) {
         this.synth = window.speechSynthesis;
+        const initVoices = () => {
+          this.getVietnameseVoices();
+        };
+        if (this.synth) {
+          this.synth.onvoiceschanged = initVoices;
+        }
+        window.speechSynthesis.addEventListener?.('voiceschanged', initVoices);
       }
       this.setupSilentAudio();
       this.setupAudioPlayers();
@@ -289,19 +296,66 @@ class TTSEngine {
       v.name.toLowerCase().includes('vietnam') || 
       v.name.toLowerCase().includes('tiếng việt')
     );
-    return vi.length > 0 ? vi : all;
+    // Sort Google voices to the top so that Chrome's "Google tiếng Việt" (exact Android TTS voice) is prioritized
+    vi.sort((a, b) => {
+      const aG = a.name.toLowerCase().includes('google') || a.voiceURI.toLowerCase().includes('google');
+      const bG = b.name.toLowerCase().includes('google') || b.voiceURI.toLowerCase().includes('google');
+      if (aG && !bG) return -1;
+      if (!aG && bG) return 1;
+      return 0;
+    });
+    return vi;
+  }
+
+  public getBrowserVietnameseVoice(preferredVoiceURI?: string): SpeechSynthesisVoice | undefined {
+    const voices = this.getVoices();
+    if (!voices || voices.length === 0) return undefined;
+
+    const viVoices = this.getVietnameseVoices();
+
+    // 1. If preferredVoiceURI is specified and not the generic 'native:android'
+    if (preferredVoiceURI && preferredVoiceURI !== 'native:android') {
+      const rawURI = preferredVoiceURI.startsWith('native:') ? preferredVoiceURI.substring(7) : preferredVoiceURI;
+      const exact = voices.find(v => 
+        v.voiceURI === preferredVoiceURI || 
+        v.voiceURI === rawURI || 
+        v.name === preferredVoiceURI || 
+        v.name === rawURI
+      );
+      if (exact) return exact;
+    }
+
+    // 2. Look for Google Vietnamese voice first (identically matching Android's default Google TTS)
+    const googleVi = viVoices.find(v => 
+      v.name.toLowerCase().includes('google') || 
+      v.voiceURI.toLowerCase().includes('google')
+    );
+    if (googleVi) return googleVi;
+
+    // 3. Fallback to any available Vietnamese voice in browser
+    if (viVoices.length > 0) {
+      return viVoices[0];
+    }
+
+    return undefined;
   }
 
   public getAllAvailableVoices(): VoiceOption[] {
     const list: VoiceOption[] = [];
 
+    const isNativeAndroidApp = typeof window !== 'undefined' && Boolean((window as any).AndroidMedia);
+
     list.push({
       id: 'native:android',
-      name: 'Giọng đọc Máy Android (100% Offline Mặc định)',
+      name: isNativeAndroidApp 
+        ? 'Giọng đọc Máy Android (100% Offline Mặc định)'
+        : 'Google Tiếng Việt (Giọng chuẩn máy Android)',
       category: 'native',
       gender: 'neutral',
-      badge: '100% Offline · Không mạng',
-      description: 'Giọng đọc ngoại tuyến có sẵn trên điện thoại, đọc mượt mà không cần mạng Internet',
+      badge: isNativeAndroidApp ? '100% Offline · Không mạng' : 'Chuẩn giọng Android · Chrome/Web',
+      description: isNativeAndroidApp
+        ? 'Giọng đọc ngoại tuyến có sẵn trên điện thoại, đọc mượt mà không cần mạng Internet'
+        : 'Giọng đọc Google chuẩn giống hệt trên điện thoại Android, chạy tối ưu trên Chrome/Web',
       isOnline: false
     });
 
@@ -347,12 +401,13 @@ class TTSEngine {
       if (list.some(item => item.id === voiceId || item.id === rawId)) return;
       const lower = bv.name.toLowerCase();
       const isMale = lower.includes('male') || lower.includes('nam') || lower.includes('an');
+      const isGoogle = lower.includes('google');
       list.push({
         id: voiceId,
-        name: bv.name,
+        name: isGoogle ? `Google Tiếng Việt (${bv.name})` : bv.name,
         category: 'browser',
         gender: isMale ? 'male' : 'female',
-        badge: 'Offline · Thiết bị',
+        badge: isGoogle ? 'Chuẩn Android · Trình duyệt' : 'Offline · Thiết bị',
         description: `Giọng đọc có sẵn trên máy (${bv.lang})`,
         isOnline: false
       });
@@ -397,21 +452,30 @@ class TTSEngine {
       this.testAudio.playbackRate = effRate;
       this.testAudio.defaultPlaybackRate = effRate;
       await this.testAudio.play();
-    } else if (this.isNativeVoice(voiceURI)) {
+    } else {
       const androidMedia = (window as any).AndroidMedia;
       if (androidMedia && typeof androidMedia.speakNative === 'function') {
         androidMedia.speakNative(sampleText, this.settings.rate || 1.0, this.settings.pitch || 1.0, 'test_sample');
+      } else {
+        const browserVoice = this.getBrowserVietnameseVoice(voiceURI);
+        if (browserVoice && this.synth) {
+          const utterance = new SpeechSynthesisUtterance(sampleText);
+          this.currentUtterance = utterance;
+          utterance.voice = browserVoice;
+          utterance.lang = browserVoice.lang || 'vi-VN';
+          utterance.rate = this.settings.rate;
+          utterance.pitch = this.settings.pitch;
+          if (this.synth.paused) {
+            this.synth.resume();
+          }
+          this.synth.speak(utterance);
+        } else {
+          // If no local Vietnamese voice installed, fallback to Google Vietnamese TTS audio
+          const url = `${getTtsApiBase()}/api/tts?voice=google:vi&rate=1.0&pitch=${this.settings.pitch}&text=${encodeURIComponent(sampleText)}`;
+          this.testAudio = new Audio(url);
+          await this.testAudio.play().catch(() => {});
+        }
       }
-    } else {
-      if (!this.synth) return;
-      const utterance = new SpeechSynthesisUtterance(sampleText);
-      this.currentUtterance = utterance;
-      utterance.rate = this.settings.rate;
-      utterance.pitch = this.settings.pitch;
-      const rawVoiceId = voiceURI.startsWith('native:') ? voiceURI.substring(7) : voiceURI;
-      const voice = this.getVoices().find(v => v.voiceURI === voiceURI || v.voiceURI === rawVoiceId);
-      if (voice) utterance.voice = voice;
-      this.synth.speak(utterance);
     }
   }
 
@@ -814,6 +878,9 @@ class TTSEngine {
   private getAudioUrl(sentenceText: string, index?: number): string {
     const processedText = pronunciationService.applyRules(sentenceText);
     let voice = this.settings.voiceURI || 'native:android';
+    if (voice === 'native:android' || voice.startsWith('native:')) {
+      voice = 'google:vi';
+    }
 
     // Multi-Voice AI Drama: Dialogue character voice detection
     if (this.settings.multiVoiceDrama) {
@@ -1513,8 +1580,49 @@ class TTSEngine {
     }
   }
 
+  private playGoogleAudioStream(sentence: string, currentToken: number) {
+    const player = this.activePlayer;
+    player.onended = null;
+    player.onerror = null;
+
+    player.onended = () => {
+      if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+      this.consecutiveErrors = 0;
+      this.activePlayerIndex = this.activePlayerIndex === 0 ? 1 : 0;
+      this.currentSentenceIndex++;
+      this.speakCurrentSentence();
+    };
+
+    player.onerror = (e) => {
+      if (currentToken !== this.playbackToken || this.state !== 'playing') return;
+      console.warn('Google TTS audio player error:', e);
+      if (this.consecutiveErrors === 0) {
+        this.consecutiveErrors++;
+        const processedText = pronunciationService.applyRules(sentence);
+        player.src = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encodeURIComponent(processedText)}`;
+        this.applyPlaybackRate(player);
+        const p = player.play();
+        if (p) p.catch(() => {});
+        return;
+      }
+      this.consecutiveErrors = 0;
+      this.activePlayerIndex = this.activePlayerIndex === 0 ? 1 : 0;
+      this.currentSentenceIndex++;
+      this.speakCurrentSentence();
+    };
+
+    const processedText = pronunciationService.applyRules(sentence);
+    player.src = `${getTtsApiBase()}/api/tts?voice=google:vi&rate=1.0&pitch=${this.settings.pitch}&text=${encodeURIComponent(processedText)}`;
+    this.applyPlaybackRate(player);
+    const p = player.play();
+    if (p) p.catch(() => {});
+  }
+
   private playBrowserTTS(sentence: string, currentToken: number) {
-    if (!this.synth) return;
+    if (!this.synth) {
+      this.playGoogleAudioStream(sentence, currentToken);
+      return;
+    }
 
     if (this.currentUtterance) {
       this.currentUtterance.onend = null;
@@ -1522,19 +1630,25 @@ class TTSEngine {
     }
     this.synth.cancel();
 
+    const selectedVoice = this.getBrowserVietnameseVoice(this.settings.voiceURI);
+
+    // If browser has no Vietnamese voice at all, fallback to Google Vietnamese TTS streaming audio
+    if (!selectedVoice && this.getVietnameseVoices().length === 0) {
+      this.playGoogleAudioStream(sentence, currentToken);
+      return;
+    }
+
     const processedText = pronunciationService.applyRules(sentence);
     const utterance = new SpeechSynthesisUtterance(processedText);
     this.currentUtterance = utterance;
     utterance.rate = this.settings.rate;
     utterance.pitch = this.settings.pitch;
 
-    const voices = this.getVoices();
-    if (this.settings.voiceURI) {
-      const selectedVoice = voices.find(v => v.voiceURI === this.settings.voiceURI);
-      if (selectedVoice) utterance.voice = selectedVoice;
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+      utterance.lang = selectedVoice.lang || 'vi-VN';
     } else {
-      const viVoice = this.getVietnameseVoices()[0];
-      if (viVoice) utterance.voice = viVoice;
+      utterance.lang = 'vi-VN';
     }
 
     utterance.onend = () => {
@@ -1548,10 +1662,18 @@ class TTSEngine {
       if (currentToken !== this.playbackToken || this.state !== 'playing') return;
       if (e.error === 'canceled' || e.error === 'interrupted') return;
       console.warn('SpeechSynthesis error:', e);
+      if (this.consecutiveErrors === 0) {
+        this.consecutiveErrors++;
+        this.playGoogleAudioStream(sentence, currentToken);
+        return;
+      }
       this.currentSentenceIndex++;
       this.speakCurrentSentence();
     };
 
+    if (this.synth.paused) {
+      this.synth.resume();
+    }
     this.synth.speak(utterance);
   }
 

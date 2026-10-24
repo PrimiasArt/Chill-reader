@@ -48,8 +48,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    // 1. Google Translate TTS Provider
-    if (voice === 'google' || voice === 'google:vi') {
+    // 1. Google Translate TTS Provider (Default Google voice / Android voice)
+    if (voice === 'google' || voice === 'google:vi' || voice === 'native:android' || voice.startsWith('native:')) {
       const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=${encodeURIComponent(sanitizedText)}`;
       const gRes = await fetch(googleUrl, {
         headers: {

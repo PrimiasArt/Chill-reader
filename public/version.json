@@ -1,8 +1,8 @@
 {
-  "versionName": "1.0.50",
-  "versionCode": 150,
-  "buildTime": "2026-10-24T17:12:59.480Z",
+  "versionName": "1.0.51",
+  "versionCode": 151,
+  "buildTime": "2026-10-24T17:45:00.000Z",
   "downloadUrl": "https://github.com/PrimiasArt/Chill-reader/releases/download/android-apk-latest/ChillReader-v1.0.apk",
   "commit": "HEAD",
-  "releaseNotes": "Bản cập nhật Sửa Triệt Để Lỗi Dừng Khi Hết Chương (v1.0.50):\n• Tự động chuyển chương trực tiếp từ lõi Audio Engine: ttsEngine tự động truy vấn chương tiếp theo từ cơ sở dữ liệu và tiếp tục phát ngay lập tức khi đọc hết chương, không còn bị phụ thuộc vào vòng đời hay trạng thái của giao diện React (kể cả khi đã bấm quay lại Thư viện).\n• Tìm kiếm chương kế tiếp thông minh: Xác định chính xác chương tiếp theo theo thứ tự danh mục trong cơ sở dữ liệu (Index-based), xử lý chuẩn xác mọi kiểu đánh số chương (chương số, chương chữ, khoảng cách chương không liên tục, chuỗi ký tự hay số nguyên).\n• Đảm bảo dữ liệu chương luôn đầy đủ: Tự động trích xuất nội dung chương đầy đủ từ bộ nhớ trước khi phát, ngăn ngừa tình trạng nạp chương rỗng khiến âm thanh bị dừng.\n• Nút chuyển bài trên tai nghe và thông báo: Hỗ trợ nút Next/Previous trên thông báo và tai nghe Bluetooth tự động chuyển sang chương tiếp theo/chương trước đó."
+  "releaseNotes": "Bản cập nhật Tối Ưu Giọng Đọc Chuẩn Máy Android Trên Web (v1.0.51):\n• Tích hợp giọng Google Tiếng Việt (chuẩn giọng máy Android) chạy trực tiếp trên bản Web qua trình duyệt Google Chrome.\n• Tự động ánh xạ và phát hiện giọng Google trên mọi thiết bị và trình duyệt.\n• Hỗ trợ cơ chế dự phòng thông minh (Google Stream Fallback) trên các trình duyệt máy tính chưa cài sẵn gói ngôn ngữ Tiếng Việt, đảm bảo âm thanh luôn phát đúng chuẩn giọng Android quen thuộc, không bao giờ bị phát tiếng lạ hay im lặng."
 }
